@@ -1,0 +1,2 @@
+# Install the open-source chart engine manually first (PyHora / JHora project).
+# Then add exact dependency pins here as you confirm imports.
