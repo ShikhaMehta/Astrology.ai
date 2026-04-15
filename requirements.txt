@@ -1,2 +1,6 @@
-# Install the open-source chart engine manually first (PyHora / JHora project).
-# Then add exact dependency pins here as you confirm imports.
+PyJHora==4.8.0
+geocoder
+geopy
+# Swiss Ephemeris (required by PyJHora at runtime). Install separately if `pip` has no wheel:
+#   pip install pyswisseph
+# On Windows with Python 3.13 you may need Microsoft C++ Build Tools to build from source.
