@@ -57,20 +57,47 @@ class PyJHoraChartEngine:
         )
 
     def generate_chart_package(self, birth_input: BirthInput) -> dict:
-        from .pyjhora_adapter import generate_pyjhora_chart_package
+        try:
+            from .pyjhora_adapter import generate_pyjhora_chart_package
+        except ModuleNotFoundError as exc:
+            missing = exc.name or "required dependency"
+            raise PyHoraNotInstalledError(
+                "Real chart generation is not available because "
+                f"'{missing}' is missing. Install the optional JHora runtime "
+                "dependencies or set ASTROLOGY_ENGINE=mock to run without them."
+            ) from exc
 
         return generate_pyjhora_chart_package(birth_input)
 
 
 def build_chart_engine() -> ChartEngine:
-    engine_name = os.getenv("ASTROLOGY_ENGINE", "jhora").strip().lower()
+    engine_name = os.getenv("ASTROLOGY_ENGINE", "auto").strip().lower()
+    if engine_name in ("", "auto"):
+        if _pyjhora_runtime_available():
+            return PyJHoraChartEngine()
+        return MockChartEngine()
     if engine_name == "mock":
         return MockChartEngine()
     if engine_name == "jhora":
         return PyJHoraChartEngine()
     raise ValueError(
-        "Unsupported ASTROLOGY_ENGINE value. Use 'jhora' or 'mock'."
+        "Unsupported ASTROLOGY_ENGINE value. Use 'auto', 'jhora', or 'mock'."
     )
+
+
+def _pyjhora_runtime_available() -> bool:
+    try:
+        import_module("swisseph")
+    except ModuleNotFoundError:
+        return False
+
+    for module_name in ("jhora", "pyhora"):
+        try:
+            import_module(module_name)
+            return True
+        except ModuleNotFoundError:
+            continue
+    return False
 
 
 def _build_placeholder_chart_package(
@@ -79,30 +106,53 @@ def _build_placeholder_chart_package(
     status: str,
     notes: list[str],
 ) -> dict:
+    chart_keys = [
+        "d1",
+        "d2",
+        "d3",
+        "d4",
+        "d7",
+        "d9",
+        "d10",
+        "d12",
+        "d16",
+        "d20",
+        "d24",
+        "d27",
+        "d30",
+        "d40",
+        "d45",
+        "d60",
+    ]
+    placeholder_chart = {
+        "ascendant": {
+            "sign": "aries",
+            "longitude_in_sign_degrees": 0.0,
+            "house": 1,
+        },
+        "planets": {},
+    }
     return {
         "source": source,
         "input": asdict(birth_input),
         "metadata": {
             "ayanamsha": "lahiri",
             "dasha_system": "vimshottari",
-            "charts_included": ["d1", "d9"],
+            "charts_included": chart_keys,
             "status": status,
         },
-        "charts": {
-            "d1": {
-                "ascendant_sign": "aries",
-                "planets_by_house": {},
-                "house_lords": {},
-            },
-            "d9": {
-                "ascendant_sign": "libra",
-                "planets_by_house": {},
-                "house_lords": {},
-            },
+        "charts": {key: placeholder_chart for key in chart_keys},
+        "derived": {
+            "houses": {},
+            "house_lords": {},
+            "dignities": {},
+            "aspects": {},
+            "conjunctions": [],
         },
         "dashas": {
             "current_mahadasha": "moon",
             "current_antardasha": "venus",
+            "current_pratyantardasha": "mars",
             "sequence": [],
         },
         "nakshatras": {

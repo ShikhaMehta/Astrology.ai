@@ -13,10 +13,12 @@ from astrology_app.validation import ValidationError, normalize_and_validate_bir
 def collect_birth_input() -> BirthInput:
     print("Enter birth details for Vedic chart generation")
     dob = input("Date of birth (YYYY-MM-DD): ").strip()
-    tob = input("Time of birth (HH:MM, 24-hour): ").strip()
+    tob = input(
+        "Time of birth (HH:MM, 24-hour local time at place of birth): "
+    ).strip()
     place = input("Place of birth (City, State, Country or City, Country): ").strip()
     timezone = input(
-        "Timezone (IANA/alias, e.g. Asia/Kolkata, IST; leave blank to auto-infer): "
+        "Timezone (IANA e.g. Asia/Kolkata; leave blank or enter best guess to auto-infer): "
     ).strip()
     return BirthInput(
         date_of_birth=dob,
@@ -38,9 +40,11 @@ def main() -> None:
         print(str(exc))
         return
 
+    # now shows timezone source so user knows if it was inferred
     print(
-        f"\nUsing local birth time at '{birth_input.birth_place}' with timezone "
-        f"'{birth_input.timezone}'."
+        f"\nUsing local birth time at '{birth_input.birth_place}' "
+        f"with timezone '{birth_input.timezone}' "
+        f"(source: {birth_input.timezone_source})."
     )
 
     try:

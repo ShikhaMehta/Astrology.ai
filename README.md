@@ -27,6 +27,7 @@ for Vedic charts and AI-assisted interpretation.
    - `python -m pip install -e .`
    - `python -m pip install -r requirements.txt`
    - `python -m pip install pyswisseph` (Swiss Ephemeris; see note below if this fails on Windows)
+   - `pip install timezonefinder geopy`
 4. Run the app:
    - `python -m astrology_app.main`
 

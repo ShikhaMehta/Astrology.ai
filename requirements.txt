@@ -1,6 +1,11 @@
-PyJHora==4.8.0
 geocoder
 geopy
-# Swiss Ephemeris (required by PyJHora at runtime). Install separately if `pip` has no wheel:
-#   pip install pyswisseph
-# On Windows with Python 3.13 you may need Microsoft C++ Build Tools to build from source.
+timezonefinder
+
+# Optional real-engine dependencies:
+#   pip install .[jhora]
+#
+# If `pyswisseph` fails to install on Windows with Python 3.13, use Python 3.11/3.12
+# or install Microsoft C++ Build Tools first.
+# PyJHora itself may be installed from the vendored wheel if needed:
+#   pip install vendor/wheels/pyjhora-4.8.0-py3-none-any.whl

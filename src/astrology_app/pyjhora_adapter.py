@@ -14,7 +14,7 @@ from geopy.geocoders import Nominatim
 
 from jhora import const as jhora_const
 from jhora import utils as jhora_utils
-from jhora.horoscope.chart import charts
+from jhora.horoscope.chart import charts, house as jhora_house
 from jhora.horoscope.dhasa.graha import vimsottari
 from jhora.panchanga import drik
 
@@ -77,11 +77,30 @@ PLANET_NAMES = {
     jhora_const.KETU_ID: "ketu",
 }
 
+VARGA_FACTORS = {
+    "d1": 1,
+    "d2": 2,
+    "d3": 3,
+    "d4": 4,
+    "d7": 7,
+    "d9": 9,
+    "d10": 10,
+    "d12": 12,
+    "d16": 16,
+    "d20": 20,
+    "d24": 24,
+    "d27": 27,
+    "d30": 30,
+    "d40": 40,
+    "d45": 45,
+    "d60": 60,
+}
+
 
 def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
     jhora_const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
 
-    lat, lon = _geocode(birth_input.birth_place)
+    lat, lon = _resolved_coordinates(birth_input)
     tz_hours = _timezone_offset_hours_at_birth(
         birth_input.timezone,
         birth_input.date_of_birth,
@@ -93,18 +112,28 @@ def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
     hh, mm = _parse_hm(birth_input.time_of_birth)
     jd = _julian_day_number((y, m, d), (hh, mm, 0))
 
-    d1 = charts.divisional_chart(
-        jd, place, divisional_chart_factor=1, chart_method=1
-    )
-    d9 = charts.divisional_chart(
-        jd, place, divisional_chart_factor=9, chart_method=1
-    )
+    raw_charts = {
+        key: charts.divisional_chart(
+            jd,
+            place,
+            divisional_chart_factor=factor,
+            chart_method=1,
+        )
+        for key, factor in VARGA_FACTORS.items()
+    }
 
+    normalized_charts = {
+        key: _serialize_chart(
+            positions=positions,
+            lagna_sign=int(positions[0][1][0]),
+            include_nakshatra_pada=(key == "d1"),
+        )
+        for key, positions in raw_charts.items()
+    }
+
+    d1 = raw_charts["d1"]
     lagna_sign_d1 = int(d1[0][1][0])
-    chart_d1 = _serialize_chart(d1, lagna_sign_d1, include_nakshatra_pada=True)
-    lagna_sign_d9 = int(d9[0][1][0])
-    chart_d9 = _serialize_chart(d9, lagna_sign_d9, include_nakshatra_pada=False)
-
+    derived = _build_derived_features(d1, lagna_sign_d1)
     nakshatras = _nakshatras_from_d1(d1)
 
     jd_now = _now_jd_same_convention(birth_input.timezone)
@@ -116,7 +145,7 @@ def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
         "metadata": {
             "ayanamsha_mode": "LAHIRI",
             "dasha_system": "vimshottari",
-            "charts_included": ["d1", "d9"],
+            "charts_included": list(VARGA_FACTORS.keys()),
             "status": "computed",
             "resolved_location": {
                 "latitude": round(lat, 6),
@@ -124,15 +153,175 @@ def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
                 "timezone_offset_hours": tz_hours,
             },
         },
-        "charts": {"d1": chart_d1, "d9": chart_d9},
+        "charts": normalized_charts,
+        "derived": derived,
         "dashas": dashas,
         "nakshatras": nakshatras,
         "notes": [
-            "Computed with PyJHora (jhora) divisional_chart and Vimśottari routines.",
+            "Computed with PyJHora divisional_chart and Vimshottari routines.",
             "Birth time is interpreted as local civil time in the resolved IANA timezone.",
-            "Place coordinates come from OpenStreetMap/Nominatim geocoding of the birth place string.",
+            "Derived D1 features include house lords, occupancies, dignities, conjunctions, and graha drishti.",
         ],
     }
+
+
+def _build_derived_features(d1_positions: list, lagna_sign: int) -> dict:
+    house_to_planet = jhora_utils.get_house_planet_list_from_planet_positions(d1_positions)
+    combust_planets = set(
+        charts.planets_in_combustion(d1_positions, use_absolute_longitude=True)
+    )
+    return {
+        "houses": _houses_from_d1(d1_positions, lagna_sign, house_to_planet),
+        "house_lords": _house_lords_from_d1(d1_positions, lagna_sign),
+        "dignities": _dignities_from_d1(d1_positions, combust_planets),
+        "aspects": _aspects_from_d1(house_to_planet),
+        "conjunctions": _conjunctions_from_d1(d1_positions, lagna_sign),
+    }
+
+
+def _houses_from_d1(d1_positions: list, lagna_sign: int, house_to_planet: list[str]) -> dict:
+    houses: dict[str, dict] = {}
+    for house_num in range(1, 13):
+        sign_idx = (lagna_sign + house_num - 1) % 12
+        occupants = [
+            _planet_name(int(pid))
+            for pid, (planet_sign, _lon) in d1_positions[1:]
+            if _is_supported_planet(int(pid))
+            if ((int(planet_sign) - lagna_sign) % 12 + 1) == house_num
+        ]
+        aspected_by = [
+            _planet_name(int(pid))
+            for pid in jhora_house.planets_aspecting_the_raasi(house_to_planet, sign_idx)
+            if _is_supported_planet(int(pid))
+        ]
+        houses[str(house_num)] = {
+            "sign": SIGN_NAMES[sign_idx],
+            "occupants": occupants,
+            "aspected_by": sorted(set(aspected_by)),
+        }
+    return houses
+
+
+def _house_lords_from_d1(d1_positions: list, lagna_sign: int) -> dict:
+    house_lords: dict[str, dict] = {}
+    planet_lookup = {
+        _planet_name(int(pid)): {
+            "sign": SIGN_NAMES[int(sign)],
+            "house": (int(sign) - lagna_sign) % 12 + 1,
+            "longitude_in_sign_degrees": round(float(lon), 4),
+        }
+        for pid, (sign, lon) in d1_positions[1:]
+        if _is_supported_planet(int(pid))
+    }
+    for house_num in range(1, 13):
+        sign_idx = (lagna_sign + house_num - 1) % 12
+        lord_id = int(jhora_const.house_owners[sign_idx])
+        lord_name = _planet_name(lord_id)
+        house_lords[str(house_num)] = {
+            "sign": SIGN_NAMES[sign_idx],
+            "lord": lord_name,
+            "lord_placement": planet_lookup[lord_name],
+        }
+    return house_lords
+
+
+def _dignities_from_d1(d1_positions: list, combust_planets: set[int]) -> dict:
+    dignities: dict[str, dict] = {}
+    for pid, (sign, lon) in d1_positions[1:]:
+        planet_id = int(pid)
+        if not _is_supported_planet(planet_id):
+            continue
+        sign_idx = int(sign)
+        strength = int(jhora_const.house_strengths_of_planets[planet_id][sign_idx])
+        dignities[_planet_name(planet_id)] = {
+            "sign": SIGN_NAMES[sign_idx],
+            "strength_label": jhora_const.house_strength_types[strength],
+            "dignity": _dignity_label(planet_id, sign_idx, float(lon), d1_positions),
+            "is_combust": planet_id in combust_planets,
+        }
+    return dignities
+
+
+def _dignity_label(
+    planet_id: int,
+    sign_idx: int,
+    longitude_in_sign: float,
+    d1_positions: list,
+) -> str:
+    if jhora_utils.is_planet_in_exalation(
+        planet_id,
+        sign_idx,
+        planet_positions=d1_positions,
+    ):
+        return "exalted"
+    if jhora_utils.is_planet_in_debilitation(
+        planet_id,
+        sign_idx,
+        planet_positions=d1_positions,
+    ):
+        return "debilitated"
+    if jhora_utils.is_planet_in_moolatrikona(
+        planet_id,
+        p_pos_tuple=(sign_idx, longitude_in_sign),
+        enforce_trikona_degrees=True,
+    ):
+        return "moolatrikona"
+
+    strength = int(jhora_const.house_strengths_of_planets[planet_id][sign_idx])
+    if strength == jhora_const._OWNER_RULER:
+        return "own_sign"
+    if strength >= jhora_const._FRIEND:
+        return "favorable_sign"
+    if strength == jhora_const._NEUTRAL_SAMAM:
+        return "neutral_sign"
+    return "challenging_sign"
+
+
+def _aspects_from_d1(house_to_planet: list[str]) -> dict:
+    graha_drishti: dict[str, dict] = {}
+    for planet_id, planet_name in PLANET_NAMES.items():
+        graha_drishti[planet_name] = {
+            "houses": [
+                int(house_num) + 1
+                for house_num in jhora_house.aspected_houses_of_the_planet(
+                    house_to_planet, planet_id
+                )
+            ],
+            "signs": [
+                SIGN_NAMES[int(sign_idx)]
+                for sign_idx in jhora_house.aspected_rasis_of_the_planet(
+                    house_to_planet, planet_id
+                )
+            ],
+            "planets": [
+                PLANET_NAMES[int(pid)]
+                for pid in jhora_house.aspected_planets_of_the_planet(
+                    house_to_planet, planet_id
+                )
+                if int(pid) in PLANET_NAMES
+            ],
+        }
+    return {"graha_drishti": graha_drishti}
+
+
+def _conjunctions_from_d1(d1_positions: list, lagna_sign: int) -> list[dict]:
+    conjunctions: list[dict] = []
+    for house_num in range(1, 13):
+        occupants = [
+            _planet_name(int(pid))
+            for pid, (planet_sign, _lon) in d1_positions[1:]
+            if _is_supported_planet(int(pid))
+            if ((int(planet_sign) - lagna_sign) % 12 + 1) == house_num
+        ]
+        if len(occupants) > 1:
+            conjunctions.append({"house": house_num, "planets": occupants})
+    return conjunctions
+
+
+def _resolved_coordinates(birth_input: BirthInput) -> tuple[float, float]:
+    if birth_input.latitude or birth_input.longitude:
+        return birth_input.latitude, birth_input.longitude
+    return _geocode(birth_input.birth_place)
 
 
 def _geocode(place: str) -> tuple[float, float]:
@@ -198,15 +387,17 @@ def _serialize_chart(
         "planets": {},
     }
     for entry in positions[1:]:
-        pid = entry[0]
+        pid = int(entry[0])
+        if not _is_supported_planet(pid):
+            continue
         sgn, lon = entry[1]
         sgn = int(sgn)
-        pname = PLANET_NAMES[int(pid)]
-        house = (sgn - lagna_sign) % 12 + 1
+        pname = _planet_name(pid)
+        house_num = (sgn - lagna_sign) % 12 + 1
         planet_data: dict = {
             "sign": SIGN_NAMES[sgn],
             "longitude_in_sign_degrees": round(float(lon), 4),
-            "house": house,
+            "house": house_num,
         }
         if include_nakshatra_pada:
             full_long = (sgn * 30.0 + float(lon)) % 360.0
@@ -225,10 +416,12 @@ def _nakshatras_from_d1(d1: list) -> dict:
     by_planet: dict = {}
     for entry in d1[1:]:
         pid = int(entry[0])
+        if not _is_supported_planet(pid):
+            continue
         sgn, lon = entry[1]
         full_long = (int(sgn) * 30.0 + float(lon)) % 360.0
         nkk, pd, _ = drik.nakshatra_pada(full_long)
-        by_planet[PLANET_NAMES[pid]] = {
+        by_planet[_planet_name(pid)] = {
             "name": NAKSHATRA_NAMES[int(nkk) - 1],
             "pada": int(pd),
         }
@@ -238,10 +431,21 @@ def _nakshatras_from_d1(d1: list) -> dict:
     }
 
 
-def _planet_name_from_dasha_lord(lord: int) -> str:
-    if isinstance(lord, int):
-        return PLANET_NAMES.get(lord, str(lord))
-    return str(lord)
+def _planet_name_from_dasha_lord(lord: int | tuple) -> str:
+    current = lord
+    while isinstance(current, tuple) and current:
+        current = current[-1]
+    if isinstance(current, int):
+        return _planet_name(current)
+    return str(current)
+
+
+def _is_supported_planet(planet_id: int) -> bool:
+    return planet_id in PLANET_NAMES
+
+
+def _planet_name(planet_id: int) -> str:
+    return PLANET_NAMES.get(planet_id, f"planet_{planet_id}")
 
 
 def _vimshottari_summary(jd_birth: float, jd_now: float, place) -> dict:
@@ -249,18 +453,19 @@ def _vimshottari_summary(jd_birth: float, jd_now: float, place) -> dict:
         jd_now,
         jd_birth,
         place,
-        dhasa_level_index=jhora_const.MAHA_DHASA_DEPTH.ANTARA,
+        dhasa_level_index=jhora_const.MAHA_DHASA_DEPTH.PRATYANTARA,
     )
     if len(running) < 2:
-        raise RuntimeError("Unexpected Vimśottari depth result from PyJHora.")
-    maha_row, antara_row = running[0], running[1]
-    maha_lords = maha_row[0]
-    antara_lords = antara_row[0]
-    maha_id = maha_lords[0] if isinstance(maha_lords, tuple) else maha_lords
-    if isinstance(antara_lords, tuple) and len(antara_lords) >= 2:
-        bhukti_id = antara_lords[1]
-    else:
-        bhukti_id = antara_lords
+        raise RuntimeError("Unexpected Vimshottari depth result from PyJHora.")
+
+    current_levels = {}
+    level_names = [
+        "current_mahadasha",
+        "current_antardasha",
+        "current_pratyantardasha",
+    ]
+    for level_name, row in zip(level_names, running):
+        current_levels[level_name] = _planet_name_from_dasha_lord(row[0])
 
     md = vimsottari.vimsottari_mahadasa(jd_birth, place)
     sequence: list[dict] = []
@@ -279,8 +484,7 @@ def _vimshottari_summary(jd_birth: float, jd_now: float, place) -> dict:
         )
 
     return {
-        "current_mahadasha": _planet_name_from_dasha_lord(int(maha_id)),
-        "current_antardasha": _planet_name_from_dasha_lord(int(bhukti_id)),
+        **current_levels,
         "as_of": {
             "julian_day": jd_now,
             "timezone": "same as birth input timezone for 'now'",

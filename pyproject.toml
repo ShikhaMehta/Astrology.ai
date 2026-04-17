@@ -8,6 +8,17 @@ version = "0.1.0"
 description = "Desktop-first Vedic astrology app with AI interpretation"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "geocoder",
+    "geopy",
+    "timezonefinder",
+]
+
+[project.optional-dependencies]
+jhora = [
+    "PyJHora==4.8.0",
+    "pyswisseph>=2.10.3.2",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

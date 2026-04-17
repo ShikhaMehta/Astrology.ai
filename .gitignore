@@ -8,8 +8,11 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv311/
 venv/
 env/
+build/
+.tmp/
 
 # Tooling
 .pytest_cache/

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from astrology_app.geocoding_utils import geocode_place, infer_timezone
 from astrology_app.models import BirthInput
 
 
@@ -18,26 +19,31 @@ TIMEZONE_ALIASES = {
     "GMT": "Etc/GMT",
 }
 
-# Country-level defaults are safe only where one timezone is used nationally.
-COUNTRY_DEFAULT_TIMEZONES = {
-    "india": "Asia/Kolkata",
-    "nepal": "Asia/Kathmandu",
-    "sri lanka": "Asia/Colombo",
-    "bhutan": "Asia/Thimphu",
-}
-
 
 def normalize_and_validate_birth_input(birth_input: BirthInput) -> BirthInput:
     _validate_date(birth_input.date_of_birth)
     _validate_time(birth_input.time_of_birth)
-    country = _validate_place(birth_input.birth_place)
-    timezone = _resolve_timezone(birth_input.timezone, country)
-    _validate_timezone(timezone)
+    _validate_place(birth_input.birth_place)
+
+    try:
+        lat, lon = geocode_place(birth_input.birth_place)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+
+    timezone, timezone_source = _resolve_timezone(
+        birth_input.timezone,
+        lat,
+        lon,
+    )
+
     return BirthInput(
         date_of_birth=birth_input.date_of_birth,
         time_of_birth=birth_input.time_of_birth,
         birth_place=birth_input.birth_place,
         timezone=timezone,
+        timezone_source=timezone_source,
+        latitude=lat,
+        longitude=lon,
     )
 
 
@@ -55,40 +61,44 @@ def _validate_time(value: str) -> None:
         raise ValidationError("Time of birth must be HH:MM (24-hour).") from exc
 
 
-def _validate_place(value: str) -> str:
+def _validate_place(value: str) -> None:
     if not value.strip():
         raise ValidationError("Place of birth is required.")
-    if "," not in value:
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if len(parts) < 2:
         raise ValidationError(
             "Place should be 'City, State, Country' or 'City, Country'. "
             "Zip/postal code can be included."
         )
-    parts = [part.strip() for part in value.split(",") if part.strip()]
-    if len(parts) < 2:
-        raise ValidationError(
-            "Place should include at least city and country (or city, state, country)."
-        )
-    return parts[-1].lower()
 
 
-def _validate_timezone(value: str) -> None:
-    try:
-        ZoneInfo(value)
-    except ZoneInfoNotFoundError as exc:
-        raise ValidationError(
-            "Timezone is invalid. Use IANA zone like Asia/Kolkata or America/Phoenix."
-        ) from exc
-
-
-def _resolve_timezone(timezone_input: str, country: str) -> str:
+def _resolve_timezone(timezone_input: str, lat: float, lon: float) -> tuple[str, str]:
     raw = timezone_input.strip()
+
     if raw:
         upper = raw.upper()
         if upper in TIMEZONE_ALIASES:
-            return TIMEZONE_ALIASES[upper]
-        return raw
-    if country in COUNTRY_DEFAULT_TIMEZONES:
-        return COUNTRY_DEFAULT_TIMEZONES[country]
-    raise ValidationError(
-        "Timezone is required for this country. For example: America/New_York."
-    )
+            return TIMEZONE_ALIASES[upper], "user provided"
+
+        try:
+            ZoneInfo(raw)
+            return raw, "user provided"
+        except ZoneInfoNotFoundError:
+            print(
+                f"Warning: '{raw}' is not recognized. "
+                "Inferring timezone from location instead."
+            )
+
+    try:
+        inferred = infer_timezone(lat, lon)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+
+    try:
+        ZoneInfo(inferred)
+    except ZoneInfoNotFoundError as exc:
+        raise ValidationError(
+            f"Inferred timezone '{inferred}' is not supported on this system."
+        ) from exc
+
+    return inferred, "inferred from location"
