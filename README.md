@@ -1,57 +1,156 @@
-# Astrology App
+# Astrology.ai
 
-Python astrology app project using open-source chart generation (PyHora/JHora style)
-for Vedic charts and AI-assisted interpretation.
+Desktop-first Python CLI for Vedic astrology chart generation and AI-ready interpretation context.
 
 ## Current Status
 
-- Project scaffolded with a reusable chart-engine adapter.
-- Session-only in-memory storage is included.
-- Engine selection is adapter-driven (`jhora` or `mock`) for future swap flexibility.
-- With `ASTROLOGY_ENGINE=jhora`, the CLI computes **D1, D9**, **Vimśottari** (current Mahā + Antara, full Mahā sequence), and **nakṣatra/pada** from PyJHora, then builds **LLM evidence** from the selected slices (same session object you print as JSON).
+The app now supports:
 
-### Ephemeris + geocoding (real engine)
+- session-only CLI flow
+- input validation with place geocoding and timezone inference
+- adapter-based engine selection
+- real PyJHora chart generation
+- mock fallback when the real runtime is unavailable
+- question routing and evidence selection for later LLM interpretation
 
-- PyJHora needs **Swiss Ephemeris** (`pyswisseph`). On Windows, Python 3.13 may need **Microsoft C++ Build Tools** to compile it from source if no wheel is available.
-- Birth place is resolved to latitude/longitude via **OpenStreetMap Nominatim** (network required the first time you geocode a place).
-- Copy Swiss Ephemeris data into `jhora/data/ephe` if PyJHora prompts you (see PyJHora docs).
+When the real engine is active, the app computes:
 
-## Local Setup
+- divisional charts: `D1`, `D2`, `D3`, `D4`, `D7`, `D9`, `D10`, `D12`, `D16`, `D20`, `D24`, `D27`, `D30`, `D40`, `D45`, `D60`
+- nakshatras
+- Vimshottari dasha summary
+- derived D1 features:
+  - house occupancies
+  - house lords
+  - dignities
+  - graha drishti
+  - conjunctions
 
-1. Install Python 3.11+ from [python.org](https://www.python.org/downloads/).
-2. Open PowerShell in this folder and create a venv:
-   - `python -m venv .venv`
-   - `.venv\Scripts\Activate.ps1`
-3. Install dependencies:
-   - `python -m pip install --upgrade pip`
-   - `python -m pip install -e .`
-   - `python -m pip install -r requirements.txt`
-   - `python -m pip install pyswisseph` (Swiss Ephemeris; see note below if this fails on Windows)
-   - `pip install timezonefinder geopy`
-4. Run the app:
-   - `python -m astrology_app.main`
+## Engine Modes
 
-### Engine Selection
+The app supports three engine modes via `ASTROLOGY_ENGINE`:
 
-- Default engine: `jhora` (PyJHora adapter).
-- Optional fallback: `mock` adapter.
-- To force mock mode in PowerShell:
-  - `$env:ASTROLOGY_ENGINE="mock"`
-  - `python -m astrology_app.main`
+- `auto`
+  - default
+  - uses the real PyJHora engine if its runtime dependencies are available
+  - otherwise falls back to `mock`
+- `jhora`
+  - forces the real PyJHora engine
+  - useful for verifying setup
+- `mock`
+  - always uses placeholder chart data
 
-## Input Notes (Current CLI)
+PowerShell examples:
 
-- Place accepts `City, Country` or `City, State, Country` (zip/postal text is allowed).
-- Timezone accepts IANA format like `Asia/Kolkata` and aliases like `IST`.
-- If timezone is blank, the app infers it only for supported single-timezone countries
-  (currently includes India).
-- Birth time is interpreted as local time at the entered birthplace + resolved timezone.
+```powershell
+$env:ASTROLOGY_ENGINE="auto"
+python -m astrology_app.main
+```
+
+```powershell
+$env:ASTROLOGY_ENGINE="jhora"
+python -m astrology_app.main
+```
+
+```powershell
+$env:ASTROLOGY_ENGINE="mock"
+python -m astrology_app.main
+```
+
+## Recommended Local Setup
+
+Python `3.11` is currently the most reliable choice on Windows for the real engine.
+
+### 1. Create and activate a venv
+
+```powershell
+py -3.11 -m venv .venv311
+.venv311\Scripts\Activate.ps1
+python --version
+```
+
+### 2. Upgrade pip
+
+```powershell
+python -m pip install --upgrade pip
+```
+
+### 3. Install the project
+
+```powershell
+python -m pip install -e .
+```
+
+### 4. Install the real-engine dependencies
+
+```powershell
+python -m pip install ".[jhora]"
+python -m pip install pytz tzdata python-dateutil
+```
+
+Notes:
+
+- `pyswisseph` is required by PyJHora for Swiss Ephemeris support.
+- On Python `3.13` on Windows, `pyswisseph` may try to build from source and require Microsoft C++ Build Tools.
+- Using Python `3.11` avoids most of that friction.
+
+## Verify Real Chart Generation
+
+Run:
+
+```powershell
+$env:ASTROLOGY_ENGINE="jhora"
+python -m astrology_app.main
+```
+
+You are using the real engine when the printed chart package contains:
+
+```text
+"source": "pyjhora-adapter"
+```
+
+If it contains:
+
+```text
+"source": "mock-engine"
+```
+
+then the app is still using placeholder data.
+
+## Runtime Notes
+
+- Birth place is geocoded through OpenStreetMap Nominatim.
+- Timezone can be entered manually or inferred from the geocoded coordinates.
+- Birth time is interpreted as local civil time at the birthplace.
+- Data is kept in memory only for the current session.
 
 ## Project Layout
 
-- `src/astrology_app/main.py`: CLI entry point for user inputs.
-- `src/astrology_app/chart_engine.py`: adapter boundary for open-source chart engine.
-- `src/astrology_app/pyjhora_adapter.py`: PyJHora → normalized chart package (D1/D9, dasha, nakṣatra).
-- `src/astrology_app/interpretation.py`: builds LLM evidence + prompt text from selected chart keys.
-- `src/astrology_app/session_store.py`: in-memory session store (no long-term storage).
-- `src/astrology_app/models.py`: typed input model.
+- `src/astrology_app/main.py`
+  - CLI entry point
+- `src/astrology_app/validation.py`
+  - input validation, geocoding, timezone resolution
+- `src/astrology_app/geocoding_utils.py`
+  - geocoding and timezone inference helpers
+- `src/astrology_app/chart_engine.py`
+  - engine selection and adapter boundary
+- `src/astrology_app/pyjhora_adapter.py`
+  - PyJHora to normalized chart package mapping
+- `src/astrology_app/question_router.py`
+  - question categorization and evidence selection
+- `src/astrology_app/interpretation.py`
+  - interpretation context and prompt preview builder
+- `src/astrology_app/session_store.py`
+  - in-memory session state
+- `src/astrology_app/models.py`
+  - shared typed models
+
+## Current Limitations
+
+- no GUI yet
+- no direct LLM call yet
+- no persistence or accounts
+- no automated tests yet
+- no transit layer yet
+- no yoga detection yet
+
+The app currently prepares high-signal astrology evidence for interpretation, but does not yet generate the final AI reading itself.
