@@ -3,7 +3,18 @@ from __future__ import annotations
 import json
 
 from astrology_app.chart_engine import PyHoraNotInstalledError, build_chart_engine
-from astrology_app.interpretation import build_interpretation_context, build_llm_prompt
+from astrology_app.export_utils import export_session_artifacts
+from astrology_app.interpretation import (
+    build_interpretation_context,
+    build_llm_prompt,
+    generate_interpretation_answer,
+)
+from astrology_app.llm_openai import (
+    OpenAIConfigurationError,
+    OpenAIRequestError,
+    generate_openai_answer,
+    openai_is_configured,
+)
 from astrology_app.models import BirthInput
 from astrology_app.question_router import categorize_question, select_relevant_chart_keys
 from astrology_app.session_store import SessionStore
@@ -67,15 +78,49 @@ def main() -> None:
         category=category,
         keys=relevant_keys,
     )
+    interpretation_answer = generate_interpretation_answer(interpretation_context)
     llm_prompt = build_llm_prompt(interpretation_context)
+    openai_answer = None
+    if openai_is_configured():
+        try:
+            openai_answer = generate_openai_answer(
+                question=question,
+                category=category.value,
+                reading_input=interpretation_context.get("reading_input", {}),
+            )
+        except (OpenAIConfigurationError, OpenAIRequestError) as exc:
+            openai_answer = f"[OpenAI unavailable] {exc}"
     session.set("interpretation_context", interpretation_context)
+    session.set("interpretation_answer", interpretation_answer)
+    session.set("openai_answer", openai_answer)
+    export_paths = export_session_artifacts(
+        birth_input=birth_input,
+        question=question,
+        chart_package=chart_package,
+        interpretation_context=interpretation_context,
+        interpretation_answer=interpretation_answer,
+        llm_prompt=llm_prompt,
+        openai_answer=openai_answer,
+    )
+    session.set("export_paths", {key: str(path) for key, path in export_paths.items()})
 
     print("\nChart package (normalized):")
     print(json.dumps(chart_package, indent=2))
     print("\nInterpretation context (selected evidence):")
     print(json.dumps(interpretation_context, indent=2))
+    print("\nReading input (structured features):")
+    print(json.dumps(interpretation_context.get("reading_input", {}), indent=2))
+    print("\nInterpretation answer:")
+    print(interpretation_answer)
+    if openai_answer:
+        print("\nOpenAI answer:")
+        print(openai_answer)
     print("\nLLM prompt preview:")
     print(llm_prompt)
+    print("\nSaved session exports:")
+    print(f"Readable: {export_paths['markdown']}")
+    print(f"Raw JSON: {export_paths['json']}")
+    print(f"Copy/Paste AI prompt: {export_paths['prompt']}")
     print("\nSession-only storage is active. Data is in memory only.")
 
 

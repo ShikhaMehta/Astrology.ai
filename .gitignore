@@ -13,6 +13,7 @@ venv/
 env/
 build/
 .tmp/
+exports/
 
 # Tooling
 .pytest_cache/

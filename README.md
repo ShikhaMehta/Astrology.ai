@@ -154,3 +154,32 @@ then the app is still using placeholder data.
 - no yoga detection yet
 
 The app currently prepares high-signal astrology evidence for interpretation, but does not yet generate the final AI reading itself.
+
+## OpenAI Integration
+
+The app can now call OpenAI using the structured `reading_input` object instead of the full raw chart JSON.
+
+Set your API key in PowerShell:
+
+```powershell
+$env:OPENAI_API_KEY="your_api_key_here"
+```
+
+Optional model override:
+
+```powershell
+$env:OPENAI_MODEL="gpt-4.1-mini"
+```
+
+Then run:
+
+```powershell
+python -m astrology_app.main
+```
+
+If `OPENAI_API_KEY` is set, the CLI will print:
+
+- `Interpretation answer:` from the local rule-based layer
+- `OpenAI answer:` from the OpenAI Responses API
+
+The saved session export will also include `openai_answer`.

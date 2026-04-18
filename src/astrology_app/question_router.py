@@ -7,7 +7,7 @@ def categorize_question(question: str) -> QuestionCategory:
     text = question.lower()
     if _contains_any(text, ("career", "job", "profession", "income", "money", "finance")):
         return QuestionCategory.CAREER
-    if _contains_any(text, ("marriage", "relationship", "partner", "love", "spouse")):
+    if _contains_any(text, ("marriage", "married", "relationship", "partner", "love", "spouse", "wedding")):
         return QuestionCategory.RELATIONSHIPS
     if _contains_any(
         text,
@@ -47,7 +47,9 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
             "charts.d1",
             "charts.d7",
             "charts.d9",
+            "derived.houses",
             "derived.house_lords",
+            "derived.dignities",
             "derived.aspects",
             "nakshatras",
             "dashas",
@@ -56,7 +58,9 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
             "charts.d1",
             "charts.d7",
             "charts.d12",
+            "derived.houses",
             "derived.house_lords",
+            "derived.dignities",
             "derived.aspects",
             "dashas",
         ],
@@ -78,8 +82,12 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
         QuestionCategory.TIMING: [
             "dashas",
             "charts.d1",
+            "charts.d7",
             "charts.d9",
             "charts.d10",
+            "derived.houses",
+            "derived.house_lords",
+            "derived.dignities",
             "derived.aspects",
         ],
         QuestionCategory.GENERAL: [
