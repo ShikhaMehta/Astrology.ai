@@ -63,6 +63,7 @@ def _build_readable_export(payload: dict[str, Any]) -> str:
     birth_input = payload.get("birth_input", {})
     interpretation_context = payload.get("interpretation_context", {})
     reading_input = interpretation_context.get("reading_input", {})
+    scope_lines = _evidence_scope_lines(payload)
 
     lines = [
         "# Astrology Session Export",
@@ -81,6 +82,9 @@ def _build_readable_export(payload: dict[str, Any]) -> str:
         "",
         "## Interpretation Answer",
         payload.get("interpretation_answer", ""),
+        "",
+        "## Evidence Scope",
+        *scope_lines,
         "",
     ]
 
@@ -122,6 +126,7 @@ def _build_prompt_export(payload: dict[str, Any]) -> str:
     challenging_signals = reading_input.get("challenging_signals", [])
     structured_facts = reading_input.get("structured_facts", {})
     model_guidance = reading_input.get("model_guidance", [])
+    scope_lines = _evidence_scope_lines(payload)
 
     lines = [
         "Use the Vedic astrology evidence below to answer the user's question.",
@@ -129,11 +134,16 @@ def _build_prompt_export(payload: dict[str, Any]) -> str:
         "Do not invent extra chart factors, yogas, doshas, transits, or unsupported timing claims.",
         "Do not make deterministic statements.",
         "If evidence is mixed or weak, say so clearly.",
+        "Treat missing layers listed under 'Evidence scope' as intentional limits of this dataset.",
+        "Do not tell the user to add transits or other missing factors unless you mention them briefly under Limits.",
         "",
         f"Question: {question}",
         "",
         f"Question type: {question_type}",
         f"Confidence hint: {confidence}",
+        "",
+        "Evidence scope:",
+        *scope_lines,
         "",
         "Supportive signals:",
         _bullet_block(supportive_signals),
@@ -179,3 +189,34 @@ def _bullet_block(items: list[str]) -> str:
     if not items:
         return "- none"
     return "\n".join(f"- {item}" for item in items)
+
+
+def _evidence_scope_lines(payload: dict[str, Any]) -> list[str]:
+    interpretation_context = payload.get("interpretation_context", {})
+    reading_input = interpretation_context.get("reading_input", {})
+    chart_package = payload.get("chart_package", {})
+    metadata = chart_package.get("metadata", {})
+    charts_included = metadata.get("charts_included", [])
+    evidence_keys = sorted(interpretation_context.get("evidence", {}).keys())
+
+    included = [
+        "Included: computed natal/divisional chart evidence from the current chart package.",
+        f"Included charts: {', '.join(charts_included) if charts_included else 'only charts present in the attached data'}.",
+        f"Included evidence keys: {', '.join(evidence_keys) if evidence_keys else 'none'}.",
+        "Included timing layer: Vimshottari dasha sequence and current dasha stack when present.",
+    ]
+
+    if reading_input.get("ready_for_model"):
+        included.append("Included structured features: question-specific extracted signals and structured facts.")
+    else:
+        included.append("Structured feature extractor status: this question does not yet have a dedicated extractor, so rely only on the provided evidence keys.")
+
+    excluded = [
+        "Not included: transits (gochara).",
+        "Not included: annual charts / varshaphala.",
+        "Not included: ashtakavarga, shadbala, or other strength systems unless explicitly shown in the data.",
+        "Not included: event rectification or life-history confirmation.",
+        "Not included: any chart factors not explicitly present in this export.",
+    ]
+
+    return [f"- {line}" for line in included + excluded]
