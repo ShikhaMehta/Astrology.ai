@@ -111,7 +111,9 @@ def _build_placeholder_chart_package(
         "d2",
         "d3",
         "d4",
+        "d6",
         "d7",
+        "d8",
         "d9",
         "d10",
         "d12",
@@ -154,6 +156,24 @@ def _build_placeholder_chart_package(
             "current_antardasha": "venus",
             "current_pratyantardasha": "mars",
             "sequence": [],
+        },
+        "sudarshana_chakra": {
+            "current_cycle": {
+                "reference": {"running_year_number": 1, "completed_years": 0},
+                "lagna_chart": [],
+                "moon_chart": [],
+                "sun_chart": [],
+                "retrograde_planets": [],
+            }
+        },
+        "transits": {
+            "current": {
+                "as_of": {
+                    "timezone": birth_input.timezone,
+                },
+                "chart": placeholder_chart,
+                "retrograde_planets": [],
+            }
         },
         "nakshatras": {
             "moon": {"name": "rohini", "pada": 2},

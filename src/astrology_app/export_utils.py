@@ -30,16 +30,19 @@ def export_session_artifacts(
     json_path = EXPORT_DIR / f"{base_name}.json"
     markdown_path = EXPORT_DIR / f"{base_name}.md"
     prompt_path = EXPORT_DIR / f"{base_name}_for_ai.txt"
+    compact_chart_package = _compact_export_chart_package(
+        chart_package=chart_package,
+        interpretation_context=interpretation_context,
+    )
 
     payload = {
         "saved_at_local": datetime.now().isoformat(timespec="seconds"),
         "birth_input": _to_jsonable(birth_input),
         "question": question,
-        "chart_package": chart_package,
-        "interpretation_context": interpretation_context,
+        "chart_package": compact_chart_package,
+        "interpretation_context": _compact_export_interpretation_context(interpretation_context),
         "interpretation_answer": interpretation_answer,
         "openai_answer": openai_answer,
-        "llm_prompt": llm_prompt,
     }
 
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -103,11 +106,6 @@ def _build_readable_export(payload: dict[str, Any]) -> str:
             "## Reading Input",
             "```json",
             json.dumps(reading_input, indent=2),
-            "```",
-            "",
-            "## Interpretation Context",
-            "```json",
-            json.dumps(interpretation_context, indent=2),
             "```",
             "",
         ]
@@ -185,6 +183,42 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
+def _compact_export_chart_package(
+    *,
+    chart_package: dict[str, Any],
+    interpretation_context: dict[str, Any],
+) -> dict[str, Any]:
+    evidence = interpretation_context.get("evidence", {})
+    metadata = chart_package.get("metadata", {})
+    compact = {
+        "source": chart_package.get("source"),
+        "input": chart_package.get("input", {}),
+        "metadata": metadata,
+        "relevant_sections": evidence,
+    }
+    notes = chart_package.get("notes", [])
+    if notes:
+        compact["notes"] = notes
+    return compact
+
+
+def _compact_export_interpretation_context(context: dict[str, Any]) -> dict[str, Any]:
+    evidence = context.get("evidence", {})
+    reading_input = context.get("reading_input", {})
+    return {
+        "question": context.get("question"),
+        "category": context.get("category"),
+        "evidence_keys": sorted(evidence.keys()),
+        "reading_input": _compact_export_reading_input(reading_input),
+    }
+
+
+def _compact_export_reading_input(reading_input: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(reading_input)
+    compact.pop("metadata", None)
+    return compact
+
+
 def _bullet_block(items: list[str]) -> str:
     if not items:
         return "- none"
@@ -197,7 +231,7 @@ def _evidence_scope_lines(payload: dict[str, Any]) -> list[str]:
     chart_package = payload.get("chart_package", {})
     metadata = chart_package.get("metadata", {})
     charts_included = metadata.get("charts_included", [])
-    evidence_keys = sorted(interpretation_context.get("evidence", {}).keys())
+    evidence_keys = interpretation_context.get("evidence_keys", [])
 
     included = [
         "Included: computed natal/divisional chart evidence from the current chart package.",

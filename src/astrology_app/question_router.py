@@ -37,10 +37,13 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
         QuestionCategory.CAREER: [
             "charts.d1",
             "charts.d2",
+            "charts.d9",
             "charts.d10",
+            "charts.d60",
             "derived.house_lords",
             "derived.dignities",
             "derived.aspects",
+            "nakshatras",
             "dashas",
         ],
         QuestionCategory.RELATIONSHIPS: [
@@ -51,6 +54,7 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
             "derived.house_lords",
             "derived.dignities",
             "derived.aspects",
+            "transits",
             "nakshatras",
             "dashas",
         ],
@@ -66,9 +70,15 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
         ],
         QuestionCategory.HEALTH: [
             "charts.d1",
+            "charts.d6",
+            "charts.d8",
             "charts.d30",
+            "derived.houses",
+            "derived.house_lords",
             "derived.dignities",
             "derived.aspects",
+            "sudarshana_chakra",
+            "transits",
             "dashas",
         ],
         QuestionCategory.SPIRITUAL: [
@@ -82,13 +92,10 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
         QuestionCategory.TIMING: [
             "dashas",
             "charts.d1",
-            "charts.d7",
             "charts.d9",
-            "charts.d10",
+            "transits",
             "derived.houses",
             "derived.house_lords",
-            "derived.dignities",
-            "derived.aspects",
         ],
         QuestionCategory.GENERAL: [
             "charts.d1",

@@ -15,6 +15,7 @@ from geopy.geocoders import Nominatim
 from jhora import const as jhora_const
 from jhora import utils as jhora_utils
 from jhora.horoscope.chart import charts, house as jhora_house
+from jhora.horoscope.dhasa import sudharsana_chakra
 from jhora.horoscope.dhasa.graha import vimsottari
 from jhora.panchanga import drik
 
@@ -82,7 +83,9 @@ VARGA_FACTORS = {
     "d2": 2,
     "d3": 3,
     "d4": 4,
+    "d6": 6,
     "d7": 7,
+    "d8": 8,
     "d9": 9,
     "d10": 10,
     "d12": 12,
@@ -137,7 +140,15 @@ def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
     nakshatras = _nakshatras_from_d1(d1)
 
     jd_now = _now_jd_same_convention(birth_input.timezone)
-    dashas = _vimshottari_summary(jd, jd_now, place)
+    dashas = _vimshottari_summary(jd, jd_now, place, d1)
+    transits = _current_transit_summary(jd_now, place, birth_input.timezone)
+    relationship_transits = _yearly_relationship_transits(
+        birth_input=birth_input,
+        place=place,
+        lagna_sign_d1=lagna_sign_d1,
+        d1_positions=d1,
+    )
+    sudarshana = _sudarshana_chakra_summary(jd, place, birth_input)
 
     return {
         "source": "pyjhora-adapter",
@@ -156,11 +167,18 @@ def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
         "charts": normalized_charts,
         "derived": derived,
         "dashas": dashas,
+        "sudarshana_chakra": sudarshana,
+        "transits": {
+            **transits,
+            "yearly_relationship": relationship_transits,
+        },
         "nakshatras": nakshatras,
         "notes": [
             "Computed with PyJHora divisional_chart and Vimshottari routines.",
             "Birth time is interpreted as local civil time in the resolved IANA timezone.",
             "Derived D1 features include house lords, occupancies, dignities, conjunctions, and graha drishti.",
+            "Current transit snapshot is included as present-time gochara support.",
+            "Sudarshana Chakra is included as a normalized current-cycle composite reference.",
         ],
     }
 
@@ -372,6 +390,33 @@ def _now_jd_same_convention(tz_name: str) -> float:
     )
 
 
+def _jd_from_local_datetime(
+    *,
+    tz_name: str,
+    year: int,
+    month: int,
+    day: int,
+    hour: int = 12,
+    minute: int = 0,
+    second: int = 0,
+) -> float:
+    local_dt = datetime(year, month, day, hour, minute, second, tzinfo=ZoneInfo(tz_name))
+    return _julian_day_number(
+        (local_dt.year, local_dt.month, local_dt.day),
+        (local_dt.hour, local_dt.minute, local_dt.second),
+    )
+
+
+def _completed_years_at_now(birth_input: BirthInput) -> int:
+    y, m, d = _parse_ymd(birth_input.date_of_birth)
+    hh, mm = _parse_hm(birth_input.time_of_birth)
+    now = datetime.now(ZoneInfo(birth_input.timezone))
+    years = now.year - y
+    if (now.month, now.day, now.hour, now.minute) < (m, d, hh, mm):
+        years -= 1
+    return max(0, years)
+
+
 def _serialize_chart(
     positions: list, lagna_sign: int, *, include_nakshatra_pada: bool
 ) -> dict:
@@ -406,6 +451,82 @@ def _serialize_chart(
             planet_data["pada"] = int(pada)
         out["planets"][pname] = planet_data
     return out
+
+
+def _serialize_sudarshana_chart(chart_rows: list[tuple[int, str]]) -> list[dict]:
+    serialized: list[dict] = []
+    for house_num, (sign_idx, occupants) in enumerate(chart_rows, start=1):
+        planet_ids = [entry for entry in str(occupants).split("/") if entry.strip()]
+        normalized_occupants: list[str] = []
+        for planet_id in planet_ids:
+            if planet_id == "L":
+                normalized_occupants.append("lagna")
+            elif planet_id.lstrip("-").isdigit() and int(planet_id) in PLANET_NAMES:
+                normalized_occupants.append(_planet_name(int(planet_id)))
+            else:
+                normalized_occupants.append(str(planet_id))
+        serialized.append(
+            {
+                "house": house_num,
+                "sign": SIGN_NAMES[int(sign_idx)],
+                "occupants": normalized_occupants,
+            }
+        )
+    return serialized
+
+
+def _current_transit_summary(jd_now: float, place, tz_name: str) -> dict:
+    transit_positions = charts.divisional_chart(jd_now, place, divisional_chart_factor=1)
+    retrograde_planets = [
+        _planet_name(int(pid))
+        for pid in drik.planets_in_retrograde(jd_now, place)
+        if int(pid) in PLANET_NAMES
+    ]
+    y, m, d, fh = jhora_utils.jd_to_gregorian(jd_now)
+    return {
+        "current": {
+            "as_of": {
+                "year": int(y),
+                "month": int(m),
+                "day": int(d),
+                "fractional_hour": float(fh),
+                "timezone": tz_name,
+            },
+            "chart": _serialize_chart(
+                positions=transit_positions,
+                lagna_sign=int(transit_positions[0][1][0]),
+                include_nakshatra_pada=False,
+            ),
+            "retrograde_planets": retrograde_planets,
+        }
+    }
+
+
+def _sudarshana_chakra_summary(jd_birth: float, place, birth_input: BirthInput) -> dict:
+    completed_years = _completed_years_at_now(birth_input)
+    running_year_number = max(1, completed_years + 1)
+    dob = _parse_ymd(birth_input.date_of_birth)
+    lagna_chart, moon_chart, sun_chart, retrograde = sudharsana_chakra.sudharshana_chakra_chart(
+        jd_birth,
+        place,
+        dob,
+        years_from_dob=running_year_number,
+        divisional_chart_factor=1,
+    )
+    return {
+        "current_cycle": {
+            "reference": {
+                "completed_years": completed_years,
+                "running_year_number": running_year_number,
+            },
+            "lagna_chart": _serialize_sudarshana_chart(lagna_chart),
+            "moon_chart": _serialize_sudarshana_chart(moon_chart),
+            "sun_chart": _serialize_sudarshana_chart(sun_chart),
+            "retrograde_planets": [
+                _planet_name(int(pid)) for pid in retrograde if int(pid) in PLANET_NAMES
+            ],
+        }
+    }
 
 
 def _nakshatras_from_d1(d1: list) -> dict:
@@ -448,7 +569,156 @@ def _planet_name(planet_id: int) -> str:
     return PLANET_NAMES.get(planet_id, f"planet_{planet_id}")
 
 
-def _vimshottari_summary(jd_birth: float, jd_now: float, place) -> dict:
+def _sign_name_from_index(sign_idx: int) -> str:
+    return SIGN_NAMES[int(sign_idx) % 12]
+
+
+def _gregorian_tuple_to_dict(gregorian: tuple[float, float, float, float]) -> dict:
+    gy, gm, gd, gfh = gregorian
+    return {
+        "year": int(gy),
+        "month": int(gm),
+        "day": int(gd),
+        "fractional_hour": float(gfh),
+    }
+
+
+def _dasha_row_to_dict(lords_tuple, start_tuple, duration_years: float) -> dict:
+    start_dict = _gregorian_tuple_to_dict(start_tuple)
+    start_jd = _julian_day_number(
+        (start_dict["year"], start_dict["month"], start_dict["day"]),
+        (start_dict["fractional_hour"], 0, 0),
+    )
+    end_jd = start_jd + float(duration_years) * vimsottari.year_duration
+    end_tuple = jhora_utils.jd_to_gregorian(end_jd)
+    row = {
+        "start": start_dict,
+        "end": _gregorian_tuple_to_dict(end_tuple),
+        "duration_years": float(duration_years),
+    }
+    tuple_lords = tuple(lords_tuple) if isinstance(lords_tuple, tuple) else tuple(lords_tuple)
+    if len(tuple_lords) >= 1:
+        row["mahadasha_lord"] = _planet_name_from_dasha_lord(tuple_lords[0])
+    if len(tuple_lords) >= 2:
+        row["antardasha_lord"] = _planet_name_from_dasha_lord(tuple_lords[1])
+    if len(tuple_lords) >= 3:
+        row["pratyantardasha_lord"] = _planet_name_from_dasha_lord(tuple_lords[2])
+    return row
+
+
+def _birth_vimshottari_balance(jd_birth: float, place, d1_positions: list) -> dict:
+    moon_entry = next(entry for entry in d1_positions[1:] if int(entry[0]) == jhora_const.MOON_ID)
+    sign_idx, lon_in_sign = moon_entry[1]
+    full_long = (int(sign_idx) * 30.0 + float(lon_in_sign)) % 360.0
+    one_star = vimsottari.one_star
+    nak_index = int(full_long / one_star)
+    nak_progress = (full_long - nak_index * one_star) / one_star
+    remaining_fraction = 1.0 - nak_progress
+    lord_id = vimsottari.vimsottari_adhipati(nak_index)
+    lord_name = _planet_name_from_dasha_lord(lord_id)
+    md_years = float(vimsottari.vimsottari_dict[lord_id])
+    years_remaining = md_years * remaining_fraction
+    _start_lord, md_start_jd = vimsottari.vimsottari_dasha_start_date(jd_birth, place)
+    md_end_jd = md_start_jd + md_years * vimsottari.year_duration
+    return {
+        "moon_nakshatra": NAKSHATRA_NAMES[nak_index],
+        "moon_pada": int(drik.nakshatra_pada(full_long)[1]),
+        "mahadasha_lord_at_birth": lord_name,
+        "elapsed_fraction": float(nak_progress),
+        "remaining_fraction": float(remaining_fraction),
+        "remaining_percentage": float(remaining_fraction * 100.0),
+        "years_remaining_in_birth_mahadasha": years_remaining,
+        "birth_mahadasha_start": _gregorian_tuple_to_dict(jhora_utils.jd_to_gregorian(md_start_jd)),
+        "birth_mahadasha_end": _gregorian_tuple_to_dict(jhora_utils.jd_to_gregorian(md_end_jd)),
+    }
+
+
+def _relationship_target_flags(
+    *,
+    transit_positions: list,
+    lagna_sign_d1: int,
+    natal_venus_sign: int,
+) -> dict[str, dict[str, bool | int | str]]:
+    house_to_planet = jhora_utils.get_house_planet_list_from_planet_positions(transit_positions)
+    natal_target_signs = {
+        "1st_house_sign": lagna_sign_d1,
+        "5th_house_sign": (lagna_sign_d1 + 4) % 12,
+        "7th_house_sign": (lagna_sign_d1 + 6) % 12,
+        "venus_sign": natal_venus_sign,
+    }
+    flags: dict[str, dict[str, bool | int | str]] = {}
+    for planet_id in (jhora_const.SATURN_ID, jhora_const.JUPITER_ID, jhora_const.RAHU_ID, jhora_const.KETU_ID):
+        transit_sign = int(transit_positions[planet_id + 1][1][0])
+        aspected_signs = {
+            int(sign_idx)
+            for sign_idx in jhora_house.aspected_rasis_of_the_planet(house_to_planet, planet_id)
+        }
+        house_from_lagna = (transit_sign - lagna_sign_d1) % 12 + 1
+        house_from_venus = (transit_sign - natal_venus_sign) % 12 + 1
+        flags[_planet_name(planet_id)] = {
+            "sign": _sign_name_from_index(transit_sign),
+            "house_from_lagna": int(house_from_lagna),
+            "house_from_venus": int(house_from_venus),
+            "occupies_1st_house_sign": transit_sign == natal_target_signs["1st_house_sign"],
+            "occupies_5th_house_sign": transit_sign == natal_target_signs["5th_house_sign"],
+            "occupies_7th_house_sign": transit_sign == natal_target_signs["7th_house_sign"],
+            "occupies_venus_sign": transit_sign == natal_target_signs["venus_sign"],
+            "aspects_1st_house_sign": natal_target_signs["1st_house_sign"] in aspected_signs,
+            "aspects_5th_house_sign": natal_target_signs["5th_house_sign"] in aspected_signs,
+            "aspects_7th_house_sign": natal_target_signs["7th_house_sign"] in aspected_signs,
+            "aspects_venus_sign": natal_target_signs["venus_sign"] in aspected_signs,
+        }
+    return flags
+
+
+def _yearly_relationship_transits(
+    *,
+    birth_input: BirthInput,
+    place,
+    lagna_sign_d1: int,
+    d1_positions: list,
+) -> dict:
+    now = datetime.now(ZoneInfo(birth_input.timezone))
+    natal_venus_sign = int(next(entry for entry in d1_positions[1:] if int(entry[0]) == jhora_const.VENUS_ID)[1][0])
+    yearly_rows: list[dict] = []
+    for year in range(now.year, now.year + 16):
+        ref_jd = _jd_from_local_datetime(
+            tz_name=birth_input.timezone,
+            year=year,
+            month=7,
+            day=1,
+            hour=12,
+        )
+        transit_positions = charts.divisional_chart(ref_jd, place, divisional_chart_factor=1)
+        yearly_rows.append(
+            {
+                "year": year,
+                "reference_date": {
+                    "month": 7,
+                    "day": 1,
+                    "fractional_hour": 12.0,
+                    "timezone": birth_input.timezone,
+                },
+                "major_planets": _relationship_target_flags(
+                    transit_positions=transit_positions,
+                    lagna_sign_d1=lagna_sign_d1,
+                    natal_venus_sign=natal_venus_sign,
+                ),
+            }
+        )
+    return {
+        "reference_method": "Yearly snapshot on July 1 at 12:00 local time.",
+        "natal_reference": {
+            "1st_house_sign": _sign_name_from_index(lagna_sign_d1),
+            "5th_house_sign": _sign_name_from_index((lagna_sign_d1 + 4) % 12),
+            "7th_house_sign": _sign_name_from_index((lagna_sign_d1 + 6) % 12),
+            "venus_sign": _sign_name_from_index(natal_venus_sign),
+        },
+        "years": yearly_rows,
+    }
+
+
+def _vimshottari_summary(jd_birth: float, jd_now: float, place, d1_positions: list) -> dict:
     running = vimsottari.get_running_dhasa_for_given_date(
         jd_now,
         jd_birth,
@@ -483,11 +753,48 @@ def _vimshottari_summary(jd_birth: float, jd_now: float, place) -> dict:
             }
         )
 
+    _, maha_rows_raw = vimsottari.get_vimsottari_dhasa_bhukthi(
+        jd_birth,
+        place,
+        dhasa_level_index=jhora_const.MAHA_DHASA_DEPTH.MAHA_DHASA_ONLY,
+    )
+    _, antara_rows_raw = vimsottari.get_vimsottari_dhasa_bhukthi(
+        jd_birth,
+        place,
+        dhasa_level_index=jhora_const.MAHA_DHASA_DEPTH.ANTARA,
+    )
+    _, praty_rows_raw = vimsottari.get_vimsottari_dhasa_bhukthi(
+        jd_birth,
+        place,
+        dhasa_level_index=jhora_const.MAHA_DHASA_DEPTH.PRATYANTARA,
+    )
+    mahadasha_table = [_dasha_row_to_dict(lords, start, duration) for lords, start, duration in maha_rows_raw]
+    antardasha_table = [_dasha_row_to_dict(lords, start, duration) for lords, start, duration in antara_rows_raw]
+    pratyantardasha_table = [_dasha_row_to_dict(lords, start, duration) for lords, start, duration in praty_rows_raw]
+    current_periods = {}
+    current_names = [
+        "mahadasha",
+        "antardasha",
+        "pratyantardasha",
+    ]
+    for period_name, row in zip(current_names, running):
+        current_periods[period_name] = {
+            "lords": [_planet_name_from_dasha_lord(lord) for lord in row[0]],
+            "start": _gregorian_tuple_to_dict(row[1]),
+            "end": _gregorian_tuple_to_dict(row[2]),
+        }
+    birth_balance = _birth_vimshottari_balance(jd_birth, place, d1_positions)
+
     return {
         **current_levels,
+        "birth_balance": birth_balance,
         "as_of": {
             "julian_day": jd_now,
             "timezone": "same as birth input timezone for 'now'",
         },
         "sequence": sequence,
+        "current_periods": current_periods,
+        "mahadasha_table": mahadasha_table,
+        "antardasha_table": antardasha_table,
+        "pratyantardasha_table": pratyantardasha_table,
     }

@@ -87,6 +87,7 @@ def main() -> None:
                 question=question,
                 category=category.value,
                 reading_input=interpretation_context.get("reading_input", {}),
+                evidence=interpretation_context.get("evidence", {}),
             )
         except (OpenAIConfigurationError, OpenAIRequestError) as exc:
             openai_answer = f"[OpenAI unavailable] {exc}"

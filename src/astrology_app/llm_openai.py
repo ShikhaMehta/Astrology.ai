@@ -26,6 +26,7 @@ def generate_openai_answer(
     question: str,
     category: str,
     reading_input: dict[str, Any],
+    evidence: dict[str, Any],
 ) -> str:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -51,7 +52,12 @@ def generate_openai_answer(
                 "content": [
                     {
                         "type": "input_text",
-                        "text": _user_prompt(question=question, category=category, reading_input=reading_input),
+                        "text": _user_prompt(
+                            question=question,
+                            category=category,
+                            reading_input=reading_input,
+                            evidence=evidence,
+                        ),
                     }
                 ],
             },
@@ -104,10 +110,18 @@ def _developer_instructions() -> str:
     )
 
 
-def _user_prompt(*, question: str, category: str, reading_input: dict[str, Any]) -> str:
+def _user_prompt(
+    *,
+    question: str,
+    category: str,
+    reading_input: dict[str, Any],
+    evidence: dict[str, Any],
+) -> str:
     return (
         f"User question: {question}\n"
         f"Question category: {category}\n\n"
+        "Selected chart evidence:\n"
+        f"{json.dumps(evidence, indent=2)}\n\n"
         "Structured reading input:\n"
         f"{json.dumps(reading_input, indent=2)}\n\n"
         "Answer in this format:\n"
