@@ -16,6 +16,8 @@ for Vedic charts and AI-assisted interpretation.
 - The app now trims those categories into compact evidence bundles before building `reading_input` and LLM prompts.
 - Compact bundles keep the highest-signal chart factors plus current dasha periods, dasha sequence, and only nearby Mahadasha and Antardasha context.
 - Full lifetime Antardasha and Pratyantardasha tables are intentionally excluded from compact prompt paths to reduce hallucination risk.
+- Relationship exports now include a compact `relationship.d9` reading block plus table-style `relationship.d3` and `relationship.d9_table` views.
+- Family question selection now includes `D3`, `D7`, `D9`, and `D12` so spouse, children, sibling, and parental context are easier to inspect together.
 
 ### Ephemeris + geocoding (real engine)
 
@@ -54,10 +56,26 @@ for Vedic charts and AI-assisted interpretation.
 - If timezone is blank, the app infers it only for supported single-timezone countries
   (currently includes India).
 - Birth time is interpreted as local time at the entered birthplace + resolved timezone.
+- If your question explicitly names a chart/factor, like `D1 5th lord Saturn's nakshatra`, the app now adds a small `requested.query_focus` block to the AI evidence bundle.
+- That keeps the compact default export, while still surfacing the specific chart detail you asked for without dumping whole extra chart trees.
+
+## Scripted Runs
+
+- If you prefer editing a file instead of answering CLI prompts, update `bin/run_saved_query.py` and run:
+  - `python bin/run_saved_query.py`
+- In that file you can set:
+  - date of birth
+  - time of birth
+  - place of birth
+  - timezone
+  - question
+  - optional `requested_chart_keys` such as `["d3", "d9", "d12"]`
+- This is useful when you want to keep one reusable script per chart question or person.
 
 ## Project Layout
 
 - `src/astrology_app/main.py`: CLI entry point for user inputs.
+- `bin/run_saved_query.py`: editable script runner for fixed birth details + question.
 - `src/astrology_app/chart_engine.py`: adapter boundary for open-source chart engine.
 - `src/astrology_app/pyjhora_adapter.py`: PyJHora → normalized chart package (D1/D9, dasha, nakṣatra).
 - `src/astrology_app/interpretation.py`: builds LLM evidence + prompt text from selected chart keys.

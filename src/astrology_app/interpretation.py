@@ -1,20 +1,38 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from astrology_app.models import QuestionCategory
 from astrology_app.question_features import build_question_features
 
+RELATIONSHIP_SUPPORT_PLANETS = (
+    "sun",
+    "moon",
+    "mars",
+    "mercury",
+    "jupiter",
+    "venus",
+    "saturn",
+    "rahu",
+    "ketu",
+)
+
 
 def build_interpretation_context(
-    chart_package: dict[str, Any], question: str, category: QuestionCategory, keys: list[str]
+    chart_package: dict[str, Any],
+    question: str,
+    category: QuestionCategory,
+    keys: list[str],
+    extra_chart_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     context = {
         "question": question,
         "category": category.value,
         "evidence": {},
         "metadata": chart_package.get("metadata", {}),
+        "extra_chart_requests": extra_chart_keys or [],
     }
     for key in keys:
         value = _get_by_path(chart_package, key)
@@ -30,6 +48,16 @@ def build_interpretation_context(
         context["evidence"] = _compact_career_evidence(chart_package)
     elif _is_relationship_question(question=question, category=category):
         context["evidence"] = _compact_relationship_evidence(chart_package)
+    _merge_requested_chart_evidence(
+        evidence=context["evidence"],
+        chart_package=chart_package,
+        extra_chart_keys=extra_chart_keys or [],
+    )
+    _merge_question_requested_evidence(
+        evidence=context["evidence"],
+        chart_package=chart_package,
+        question=question,
+    )
     context["reading_input"] = build_question_features(
         question=question,
         category=category,
@@ -408,53 +436,98 @@ def _compact_longevity_evidence(chart_package: dict[str, Any]) -> dict[str, Any]
 def _compact_career_evidence(chart_package: dict[str, Any]) -> dict[str, Any]:
     d1 = chart_package.get("charts", {}).get("d1", {})
     d2 = chart_package.get("charts", {}).get("d2", {})
+    d4 = chart_package.get("charts", {}).get("d4", {})
     d9 = chart_package.get("charts", {}).get("d9", {})
     d10 = chart_package.get("charts", {}).get("d10", {})
+    houses = chart_package.get("derived", {}).get("houses", {})
     house_lords = chart_package.get("derived", {}).get("house_lords", {})
     dignities = chart_package.get("derived", {}).get("dignities", {})
     aspects = chart_package.get("derived", {}).get("aspects", {}).get("graha_drishti", {})
+    ashtakavarga = chart_package.get("derived", {}).get("ashtakavarga", {})
+    special_conditions = chart_package.get("derived", {}).get("special_conditions", {})
     dashas = chart_package.get("dashas", {})
     return {
         "career.d1": {
             "ascendant": d1.get("ascendant", {}),
+            "2nd_house": houses.get("2", {}),
+            "4th_house": houses.get("4", {}),
+            "6th_house": houses.get("6", {}),
+            "8th_house": houses.get("8", {}),
+            "11th_house": houses.get("11", {}),
+            "12th_house": houses.get("12", {}),
             "2nd_lord": house_lords.get("2", {}),
+            "4th_lord": house_lords.get("4", {}),
             "6th_lord": house_lords.get("6", {}),
+            "8th_lord": house_lords.get("8", {}),
             "10th_lord": house_lords.get("10", {}),
             "11th_lord": house_lords.get("11", {}),
+            "12th_lord": house_lords.get("12", {}),
+            "moon": d1.get("planets", {}).get("moon", {}),
             "sun": d1.get("planets", {}).get("sun", {}),
             "mercury": d1.get("planets", {}).get("mercury", {}),
             "venus": d1.get("planets", {}).get("venus", {}),
             "jupiter": d1.get("planets", {}).get("jupiter", {}),
             "saturn": d1.get("planets", {}).get("saturn", {}),
+            "rahu": d1.get("planets", {}).get("rahu", {}),
             "dignities": {
+                "moon": dignities.get("moon", {}),
                 "sun": dignities.get("sun", {}),
                 "mercury": dignities.get("mercury", {}),
                 "venus": dignities.get("venus", {}),
                 "jupiter": dignities.get("jupiter", {}),
                 "saturn": dignities.get("saturn", {}),
+                "rahu": dignities.get("rahu", {}),
                 "2nd_lord": dignities.get(house_lords.get("2", {}).get("lord"), {}),
+                "4th_lord": dignities.get(house_lords.get("4", {}).get("lord"), {}),
                 "6th_lord": dignities.get(house_lords.get("6", {}).get("lord"), {}),
+                "8th_lord": dignities.get(house_lords.get("8", {}).get("lord"), {}),
                 "10th_lord": dignities.get(house_lords.get("10", {}).get("lord"), {}),
                 "11th_lord": dignities.get(house_lords.get("11", {}).get("lord"), {}),
+                "12th_lord": dignities.get(house_lords.get("12", {}).get("lord"), {}),
             },
             "career_aspects": {
                 "saturn": aspects.get("saturn", {}),
                 "jupiter": aspects.get("jupiter", {}),
+                "moon": aspects.get("moon", {}),
                 "sun": aspects.get("sun", {}),
                 "mercury": aspects.get("mercury", {}),
+                "rahu": aspects.get("rahu", {}),
             },
         },
         "career.d2": _compact_planet_house_view(d2, ("jupiter", "venus", "mercury", "saturn")),
+        "career.d4": {
+            "ascendant": d4.get("ascendant", {}),
+            "planets": {
+                "moon": d4.get("planets", {}).get("moon", {}),
+                "mercury": d4.get("planets", {}).get("mercury", {}),
+                "venus": d4.get("planets", {}).get("venus", {}),
+                "jupiter": d4.get("planets", {}).get("jupiter", {}),
+                "saturn": d4.get("planets", {}).get("saturn", {}),
+            },
+        },
         "career.d9": _compact_planet_house_view(d9, ("sun", "mercury", "venus", "jupiter", "saturn")),
         "career.d10": _compact_planet_house_view(d10, ("sun", "mercury", "venus", "jupiter", "saturn")),
+        "career.ashtakavarga": {
+            "sav_by_house": ashtakavarga.get("sav_by_house", {}),
+        },
+        "career.special_conditions": {
+            "gandanta": special_conditions.get("gandanta", []),
+        },
         "career.dashas": {
             **_compact_dasha_evidence(dashas),
+            "wealth_lord_links": _compact_wealth_dasha_links(
+                dashas=dashas,
+                d1=d1,
+                house_lords=house_lords,
+                aspects=aspects,
+            ),
         },
     }
 
 
 def _compact_relationship_evidence(chart_package: dict[str, Any]) -> dict[str, Any]:
     d1 = chart_package.get("charts", {}).get("d1", {})
+    d3 = chart_package.get("charts", {}).get("d3", {})
     d9 = chart_package.get("charts", {}).get("d9", {})
     houses = chart_package.get("derived", {}).get("houses", {})
     house_lords = chart_package.get("derived", {}).get("house_lords", {})
@@ -479,6 +552,8 @@ def _compact_relationship_evidence(chart_package: dict[str, Any]) -> dict[str, A
                 "7th_lord": dignities.get(house_lords.get("7", {}).get("lord"), {}),
             },
         },
+        "relationship.d3": _compact_planet_house_view(d3, RELATIONSHIP_SUPPORT_PLANETS),
+        "relationship.d9_table": _compact_planet_house_view(d9, RELATIONSHIP_SUPPORT_PLANETS),
         "relationship.d9": _compact_d9_marriage_view(d9),
         "relationship.dashas": {
             **_compact_dasha_evidence(dashas),
@@ -504,31 +579,318 @@ def _compact_d9_marriage_view(d9: dict[str, Any]) -> dict[str, Any]:
     if asc_sign is None:
         return {
             "ascendant": d9.get("ascendant", {}),
+            "5th_house": {},
             "7th_house": {},
+            "9th_house": {},
+            "5th_lord": {},
             "7th_lord": {},
+            "9th_lord": {},
             "venus": planets.get("venus", {}),
+            "moon": planets.get("moon", {}),
+            "jupiter": planets.get("jupiter", {}),
         }
 
+    fifth_house_sign = _house_sign_from_chart(asc_sign, 5)
     seventh_house_sign = _house_sign_from_chart(asc_sign, 7)
+    ninth_house_sign = _house_sign_from_chart(asc_sign, 9)
+    fifth_lord_name = _sign_lord(fifth_house_sign)
     seventh_lord_name = _sign_lord(seventh_house_sign)
+    ninth_lord_name = _sign_lord(ninth_house_sign)
+    fifth_lord = planets.get(fifth_lord_name, {}) if fifth_lord_name else {}
     seventh_lord = planets.get(seventh_lord_name, {}) if seventh_lord_name else {}
-    seventh_occupants = [
-        planet_name
-        for planet_name, planet_data in planets.items()
-        if isinstance(planet_data, dict) and planet_data.get("house") == 7
-    ]
+    ninth_lord = planets.get(ninth_lord_name, {}) if ninth_lord_name else {}
+    venus = planets.get("venus", {})
+
     return {
         "ascendant": d9.get("ascendant", {}),
+        "5th_house": {
+            "sign": fifth_house_sign,
+            "occupants": _occupants_in_house(planets, 5),
+        },
         "7th_house": {
             "sign": seventh_house_sign,
-            "occupants": seventh_occupants,
+            "occupants": _occupants_in_house(planets, 7),
+        },
+        "9th_house": {
+            "sign": ninth_house_sign,
+            "occupants": _occupants_in_house(planets, 9),
+        },
+        "5th_lord": {
+            "lord": fifth_lord_name,
+            "placement": fifth_lord,
+            "sign_strength": _planet_sign_strength(fifth_lord_name, fifth_lord.get("sign")),
         },
         "7th_lord": {
             "lord": seventh_lord_name,
             "placement": seventh_lord,
+            "sign_strength": _planet_sign_strength(seventh_lord_name, seventh_lord.get("sign")),
         },
-        "venus": planets.get("venus", {}),
+        "9th_lord": {
+            "lord": ninth_lord_name,
+            "placement": ninth_lord,
+            "sign_strength": _planet_sign_strength(ninth_lord_name, ninth_lord.get("sign")),
+        },
+        "venus": {
+            **venus,
+            **_planet_nakshatra_payload(venus),
+            "sign_strength": _planet_sign_strength("venus", venus.get("sign")),
+        },
+        "moon": {
+            **planets.get("moon", {}),
+            "sign_strength": _planet_sign_strength("moon", planets.get("moon", {}).get("sign")),
+        },
+        "jupiter": {
+            **planets.get("jupiter", {}),
+            "sign_strength": _planet_sign_strength("jupiter", planets.get("jupiter", {}).get("sign")),
+        },
     }
+
+
+def _occupants_in_house(planets: dict[str, Any], house_num: int) -> list[str]:
+    return [
+        planet_name
+        for planet_name, planet_data in planets.items()
+        if isinstance(planet_data, dict) and planet_data.get("house") == house_num
+    ]
+
+
+def _planet_nakshatra_payload(planet_data: dict[str, Any]) -> dict[str, Any]:
+    sign = planet_data.get("sign")
+    longitude = planet_data.get("longitude_in_sign_degrees")
+    if sign is None or longitude is None:
+        return {}
+    signs = [
+        "aries",
+        "taurus",
+        "gemini",
+        "cancer",
+        "leo",
+        "virgo",
+        "libra",
+        "scorpio",
+        "sagittarius",
+        "capricorn",
+        "aquarius",
+        "pisces",
+    ]
+    if sign not in signs:
+        return {}
+    full_longitude = signs.index(sign) * 30.0 + float(longitude)
+    nakshatra_size = 360.0 / 27.0
+    nakshatra_index = int(full_longitude // nakshatra_size)
+    pada = int((full_longitude % nakshatra_size) // (nakshatra_size / 4.0)) + 1
+    nakshatras = [
+        "ashwini",
+        "bharani",
+        "krittika",
+        "rohini",
+        "mrigashira",
+        "ardra",
+        "punarvasu",
+        "pushya",
+        "ashlesha",
+        "magha",
+        "purva_phalguni",
+        "uttara_phalguni",
+        "hasta",
+        "chitra",
+        "swati",
+        "vishakha",
+        "anuradha",
+        "jyeshtha",
+        "mula",
+        "purva_ashadha",
+        "uttara_ashadha",
+        "shravana",
+        "dhanishta",
+        "shatabhisha",
+        "purva_bhadrapada",
+        "uttara_bhadrapada",
+        "revati",
+    ]
+    return {
+        "nakshatra": nakshatras[nakshatra_index],
+        "pada": pada,
+    }
+
+
+def _planet_sign_strength(planet_name: str | None, sign_name: str | None) -> str | None:
+    if not planet_name or not sign_name:
+        return None
+    exaltation = {
+        "sun": "aries",
+        "moon": "taurus",
+        "mars": "capricorn",
+        "mercury": "virgo",
+        "jupiter": "cancer",
+        "venus": "pisces",
+        "saturn": "libra",
+    }
+    debilitation = {
+        "sun": "libra",
+        "moon": "scorpio",
+        "mars": "cancer",
+        "mercury": "pisces",
+        "jupiter": "capricorn",
+        "venus": "virgo",
+        "saturn": "aries",
+    }
+    sign_lords = {
+        "aries": "mars",
+        "taurus": "venus",
+        "gemini": "mercury",
+        "cancer": "moon",
+        "leo": "sun",
+        "virgo": "mercury",
+        "libra": "venus",
+        "scorpio": "mars",
+        "sagittarius": "jupiter",
+        "capricorn": "saturn",
+        "aquarius": "saturn",
+        "pisces": "jupiter",
+    }
+    friends = {
+        "sun": {"moon", "mars", "jupiter"},
+        "moon": {"sun", "mercury"},
+        "mars": {"sun", "moon", "jupiter"},
+        "mercury": {"sun", "venus"},
+        "jupiter": {"sun", "moon", "mars"},
+        "venus": {"mercury", "saturn"},
+        "saturn": {"mercury", "venus"},
+    }
+    enemies = {
+        "sun": {"venus", "saturn"},
+        "moon": set(),
+        "mars": {"mercury"},
+        "mercury": {"moon"},
+        "jupiter": {"venus", "mercury"},
+        "venus": {"sun", "moon"},
+        "saturn": {"sun", "moon", "mars"},
+    }
+
+    if exaltation.get(planet_name) == sign_name:
+        return "exalted"
+    if debilitation.get(planet_name) == sign_name:
+        return "debilitated"
+    sign_lord = sign_lords.get(sign_name)
+    if sign_lord == planet_name:
+        return "own_sign"
+    if sign_lord in friends.get(planet_name, set()):
+        return "favorable_sign"
+    if sign_lord in enemies.get(planet_name, set()):
+        return "challenging_sign"
+    return "neutral_sign"
+
+
+def _merge_requested_chart_evidence(
+    *,
+    evidence: dict[str, Any],
+    chart_package: dict[str, Any],
+    extra_chart_keys: list[str],
+) -> None:
+    charts = chart_package.get("charts", {})
+    for chart_key in extra_chart_keys:
+        chart_value = charts.get(chart_key)
+        if chart_value is not None:
+            evidence[f"requested.{chart_key}"] = chart_value
+
+
+def _merge_question_requested_evidence(
+    *,
+    evidence: dict[str, Any],
+    chart_package: dict[str, Any],
+    question: str,
+) -> None:
+    query_focus = _extract_query_focus(chart_package=chart_package, question=question)
+    if query_focus:
+        evidence["requested.query_focus"] = query_focus
+
+
+def _extract_query_focus(*, chart_package: dict[str, Any], question: str) -> dict[str, Any]:
+    text = question.lower()
+    chart_match = re.search(r"\bd(1|2|3|4|6|7|8|9|10|12|16|20|24|27|30|40|45|60)\b", text)
+    if not chart_match:
+        return {}
+
+    chart_key = f"d{chart_match.group(1)}"
+    chart = chart_package.get("charts", {}).get(chart_key, {})
+    if not isinstance(chart, dict):
+        return {}
+
+    focus: dict[str, Any] = {
+        "chart": chart_key,
+    }
+    if chart.get("ascendant"):
+        focus["ascendant"] = chart.get("ascendant", {})
+
+    house_match = re.search(r"\b(1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th|11th|12th)\s+lord\b", text)
+    house_num = _ordinal_to_house_num(house_match.group(1)) if house_match else None
+    house_lords = chart_package.get("derived", {}).get("house_lords", {})
+    dignities = chart_package.get("derived", {}).get("dignities", {})
+    if house_num:
+        lord_data = house_lords.get(house_num, {})
+        lord_name = lord_data.get("lord")
+        focus["house_lord"] = {
+            "house": house_num,
+            **lord_data,
+        }
+        if lord_name:
+            focus["house_lord"]["dignity"] = dignities.get(lord_name, {})
+
+    requested_planet = _requested_planet_name(text)
+    if requested_planet:
+        planet_data = chart.get("planets", {}).get(requested_planet, {})
+        if planet_data:
+            focus["planet"] = {
+                "name": requested_planet,
+                **planet_data,
+            }
+
+    if "nakshatra" in text:
+        focus["requested_fields"] = ["nakshatra", "pada"]
+        if requested_planet and "planet" in focus:
+            focus["requested_value"] = {
+                "planet": requested_planet,
+                "nakshatra": focus["planet"].get("nakshatra"),
+                "pada": focus["planet"].get("pada"),
+            }
+        elif house_num and "house_lord" in focus:
+            lord_name = focus["house_lord"].get("lord")
+            lord_planet = chart.get("planets", {}).get(lord_name, {}) if lord_name else {}
+            focus["requested_value"] = {
+                "house_lord": lord_name,
+                "nakshatra": lord_planet.get("nakshatra"),
+                "pada": lord_planet.get("pada"),
+            }
+
+    if not any(key in focus for key in ("planet", "house_lord", "requested_value")):
+        return {}
+    return focus
+
+
+def _ordinal_to_house_num(ordinal: str) -> str | None:
+    mapping = {
+        "1st": "1",
+        "2nd": "2",
+        "3rd": "3",
+        "4th": "4",
+        "5th": "5",
+        "6th": "6",
+        "7th": "7",
+        "8th": "8",
+        "9th": "9",
+        "10th": "10",
+        "11th": "11",
+        "12th": "12",
+    }
+    return mapping.get(ordinal)
+
+
+def _requested_planet_name(text: str) -> str | None:
+    for planet_name in ("sun", "moon", "mars", "mercury", "jupiter", "venus", "saturn", "rahu", "ketu"):
+        if re.search(rf"\b{planet_name}\b", text):
+            return planet_name
+    return None
 
 
 def _slim_antardasha_table(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -558,6 +920,58 @@ def _compact_dasha_evidence(dashas: dict[str, Any]) -> dict[str, Any]:
             current_periods.get("antardasha", {}),
         ),
     }
+
+
+def _compact_wealth_dasha_links(
+    *,
+    dashas: dict[str, Any],
+    d1: dict[str, Any],
+    house_lords: dict[str, Any],
+    aspects: dict[str, Any],
+) -> list[dict[str, Any]]:
+    second_lord_name = house_lords.get("2", {}).get("lord")
+    eleventh_lord_name = house_lords.get("11", {}).get("lord")
+    wealth_lords = {lord for lord in (second_lord_name, eleventh_lord_name) if lord}
+    current_periods = dashas.get("current_periods", {})
+    d1_planets = d1.get("planets", {})
+    links: list[dict[str, Any]] = []
+
+    for period_name in ("mahadasha", "antardasha", "pratyantardasha"):
+        period = current_periods.get(period_name, {})
+        lords = period.get("lords", [])
+        if not lords:
+            continue
+        active_lord = lords[-1]
+        active_data = d1_planets.get(active_lord, {})
+        active_house = active_data.get("house")
+        second_lord_house = d1_planets.get(second_lord_name, {}).get("house")
+        eleventh_lord_house = d1_planets.get(eleventh_lord_name, {}).get("house")
+        active_aspects = aspects.get(active_lord, {}).get("planets", [])
+
+        link_tags: list[str] = []
+        if active_lord == second_lord_name:
+            link_tags.append("is_2nd_lord")
+        if active_lord == eleventh_lord_name:
+            link_tags.append("is_11th_lord")
+        if active_house is not None and active_house == second_lord_house and second_lord_name:
+            link_tags.append("conjunct_2nd_lord")
+        if active_house is not None and active_house == eleventh_lord_house and eleventh_lord_name:
+            link_tags.append("conjunct_11th_lord")
+        if second_lord_name and second_lord_name in active_aspects:
+            link_tags.append("aspects_2nd_lord")
+        if eleventh_lord_name and eleventh_lord_name in active_aspects:
+            link_tags.append("aspects_11th_lord")
+
+        links.append(
+            {
+                "period": period_name,
+                "active_lord": active_lord,
+                "active_lord_house": active_house,
+                "is_direct_wealth_lord": active_lord in wealth_lords,
+                "link_tags": link_tags,
+            }
+        )
+    return links
 
 
 def _focused_mahadasha_table(rows: list[dict[str, Any]], current_period: dict[str, Any], radius: int = 1) -> list[dict[str, Any]]:

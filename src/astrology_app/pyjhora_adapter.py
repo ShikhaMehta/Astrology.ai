@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from geopy.geocoders import Nominatim
 
 from jhora import const as jhora_const
 from jhora import utils as jhora_utils
-from jhora.horoscope.chart import charts, house as jhora_house
+from jhora.horoscope.chart import charts, house as jhora_house, ashtakavarga as jhora_ashtakavarga
 from jhora.horoscope.dhasa import sudharsana_chakra
 from jhora.horoscope.dhasa.graha import vimsottari
 from jhora.panchanga import drik
@@ -194,6 +195,8 @@ def _build_derived_features(d1_positions: list, lagna_sign: int) -> dict:
         "dignities": _dignities_from_d1(d1_positions, combust_planets),
         "aspects": _aspects_from_d1(house_to_planet),
         "conjunctions": _conjunctions_from_d1(d1_positions, lagna_sign),
+        "ashtakavarga": _ashtakavarga_summary(house_to_planet, lagna_sign),
+        "special_conditions": _special_conditions_from_d1(d1_positions),
     }
 
 
@@ -334,6 +337,80 @@ def _conjunctions_from_d1(d1_positions: list, lagna_sign: int) -> list[dict]:
         if len(occupants) > 1:
             conjunctions.append({"house": house_num, "planets": occupants})
     return conjunctions
+
+
+def _ashtakavarga_summary(house_to_planet: list[str], lagna_sign: int) -> dict:
+    try:
+        _bav, sav, _pav = jhora_ashtakavarga.get_ashtaka_varga(house_to_planet)
+    except Exception:
+        return {}
+
+    summary: dict[str, dict[str, Any] | list[int]] = {
+        "sav_by_house": {},
+    }
+    for house_num in (2, 4, 11, 12):
+        sign_idx = (lagna_sign + house_num - 1) % 12
+        summary["sav_by_house"][str(house_num)] = {
+            "points": int(sav[sign_idx]),
+            "sign": SIGN_NAMES[sign_idx],
+        }
+    return summary
+
+
+def _special_conditions_from_d1(d1_positions: list) -> dict:
+    return {
+        "gandanta": _gandanta_from_d1(d1_positions),
+    }
+
+
+def _gandanta_from_d1(d1_positions: list) -> list[dict]:
+    gandanta_flags: list[dict] = []
+    for pid, (sign, lon) in d1_positions[1:]:
+        planet_id = int(pid)
+        if not _is_supported_planet(planet_id):
+            continue
+        sign_idx = int(sign)
+        longitude_in_sign = float(lon)
+        full_longitude = (sign_idx * 30.0 + longitude_in_sign) % 360.0
+        nakshatra_index = int(full_longitude // (360.0 / 27.0))
+        degrees_into_nakshatra = full_longitude % (360.0 / 27.0)
+
+        gandanta_types: list[str] = []
+        if _is_rashi_gandanta(sign_idx, longitude_in_sign):
+            gandanta_types.append("rashi_gandanta")
+        if _is_nakshatra_gandanta(nakshatra_index, degrees_into_nakshatra):
+            gandanta_types.append("nakshatra_gandanta")
+        if not gandanta_types:
+            continue
+
+        gandanta_flags.append(
+            {
+                "planet": _planet_name(planet_id),
+                "sign": SIGN_NAMES[sign_idx],
+                "longitude_in_sign_degrees": round(longitude_in_sign, 4),
+                "nakshatra": NAKSHATRA_NAMES[nakshatra_index],
+                "gandanta_types": gandanta_types,
+            }
+        )
+    return gandanta_flags
+
+
+def _is_rashi_gandanta(sign_idx: int, longitude_in_sign: float) -> bool:
+    water_signs = {3, 7, 11}  # cancer, scorpio, pisces
+    fire_signs = {0, 4, 8}  # aries, leo, sagittarius
+    gandanta_band = 3.3333333333
+    return (sign_idx in water_signs and longitude_in_sign >= 30.0 - gandanta_band) or (
+        sign_idx in fire_signs and longitude_in_sign <= gandanta_band
+    )
+
+
+def _is_nakshatra_gandanta(nakshatra_index: int, degrees_into_nakshatra: float) -> bool:
+    gandanta_end = {8, 17, 26}  # ashlesha, jyeshtha, revati
+    gandanta_start = {0, 18, 9}  # ashwini, mula, magha
+    gandanta_band = 0.8
+    return (nakshatra_index in gandanta_end and degrees_into_nakshatra >= (360.0 / 27.0) - gandanta_band) or (
+        nakshatra_index in gandanta_start and degrees_into_nakshatra <= gandanta_band
+    )
 
 
 def _resolved_coordinates(birth_input: BirthInput) -> tuple[float, float]:

@@ -5,7 +5,7 @@ from astrology_app.models import QuestionCategory
 
 def categorize_question(question: str) -> QuestionCategory:
     text = question.lower()
-    if _contains_any(text, ("career", "job", "profession", "income", "money", "finance")):
+    if _contains_any(text, ("career", "job", "profession", "income", "money", "finance", "finances", "wealth")):
         return QuestionCategory.CAREER
     if _contains_any(text, ("marriage", "married", "relationship", "partner", "love", "spouse", "wedding")):
         return QuestionCategory.RELATIONSHIPS
@@ -37,12 +37,16 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
         QuestionCategory.CAREER: [
             "charts.d1",
             "charts.d2",
+            "charts.d4",
             "charts.d9",
             "charts.d10",
             "charts.d60",
+            "derived.houses",
             "derived.house_lords",
             "derived.dignities",
             "derived.aspects",
+            "derived.ashtakavarga",
+            "derived.special_conditions",
             "nakshatras",
             "dashas",
         ],
@@ -60,7 +64,9 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
         ],
         QuestionCategory.FAMILY: [
             "charts.d1",
+            "charts.d3",
             "charts.d7",
+            "charts.d9",
             "charts.d12",
             "derived.houses",
             "derived.house_lords",

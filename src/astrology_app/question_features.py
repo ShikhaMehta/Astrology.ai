@@ -62,6 +62,8 @@ def build_question_features(
         return _marriage_features(evidence, metadata)
     if question_type == "career":
         return _career_features(evidence, metadata)
+    if question_type == "wealth":
+        return _wealth_features(evidence, metadata)
     if question_type == "health":
         return _health_features(evidence, metadata)
     if question_type == "longevity":
@@ -86,7 +88,7 @@ def _question_type(question: str, category: QuestionCategory) -> str:
     if category == QuestionCategory.CAREER and any(
         term in text for term in ("money", "finance", "finances", "wealth", "income", "earning")
     ):
-        return "career"
+        return "wealth"
     if category == QuestionCategory.FAMILY and any(
         term in text for term in ("kid", "kids", "child", "children")
     ):
@@ -219,6 +221,22 @@ def _career_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> dict
     }
 
 
+def _wealth_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    compact = evidence.get("career.d1")
+    if isinstance(compact, dict):
+        return _compact_wealth_features(evidence, metadata)
+
+    features = _career_features(evidence, metadata)
+    features["question_type"] = "wealth"
+    features["focus"] = {
+        "wealth_houses": ["2", "4", "11", "12"],
+        "liquidity_planets": ["moon", "mercury", "jupiter"],
+        "debt_indicators": ["6th_house", "8th_house", "rahu"],
+        "dasha_wealth_lords": ["venus", "jupiter", "moon"],
+    }
+    return features
+
+
 def _compact_career_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
     d1 = evidence.get("career.d1", {})
     d2 = evidence.get("career.d2", {})
@@ -332,6 +350,185 @@ def _compact_career_features(evidence: dict[str, Any], metadata: dict[str, Any])
             "Focus on profession, work pattern, and career growth rather than unrelated life areas.",
             "Use D10 as the main confirmation chart and D2 only as support for income and resources.",
             "Discuss timing as likely periods, not exact promises.",
+        ],
+        "metadata": metadata,
+    }
+
+
+def _compact_wealth_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    d1 = evidence.get("career.d1", {})
+    d2 = evidence.get("career.d2", {})
+    d4 = evidence.get("career.d4", {})
+    d9 = evidence.get("career.d9", {})
+    d10 = evidence.get("career.d10", {})
+    ashtakavarga = evidence.get("career.ashtakavarga", {})
+    special_conditions = evidence.get("career.special_conditions", {})
+    dashas = evidence.get("career.dashas", {})
+
+    dignities = d1.get("dignities", {})
+    aspects = d1.get("career_aspects", {})
+    second_house = d1.get("2nd_house", {})
+    fourth_house = d1.get("4th_house", {})
+    sixth_house = d1.get("6th_house", {})
+    eighth_house = d1.get("8th_house", {})
+    eleventh_house = d1.get("11th_house", {})
+    twelfth_house = d1.get("12th_house", {})
+    second_lord = d1.get("2nd_lord", {})
+    fourth_lord = d1.get("4th_lord", {})
+    sixth_lord = d1.get("6th_lord", {})
+    eighth_lord = d1.get("8th_lord", {})
+    eleventh_lord = d1.get("11th_lord", {})
+    twelfth_lord = d1.get("12th_lord", {})
+    wealth_dasha_links = dashas.get("wealth_lord_links", [])
+    gandanta = special_conditions.get("gandanta", [])
+    ashtakavarga_houses = ashtakavarga.get("sav_by_house", {})
+
+    supportive_signals: list[str] = []
+    challenging_signals: list[str] = []
+
+    for house_num, label, house_data in (
+        ("2", "D1 2nd house", second_house),
+        ("4", "D1 4th house", fourth_house),
+        ("11", "D1 11th house", eleventh_house),
+        ("12", "D1 12th house", twelfth_house),
+        ("6", "D1 6th house", sixth_house),
+        ("8", "D1 8th house", eighth_house),
+    ):
+        _collect_house_signals(
+            house_data=house_data,
+            label=label,
+            supportive_signals=supportive_signals,
+            challenging_signals=challenging_signals,
+        )
+
+    for lord_label, lord_key, lord_data in (
+        ("2nd lord", "2nd_lord", second_lord),
+        ("4th lord", "4th_lord", fourth_lord),
+        ("6th lord", "6th_lord", sixth_lord),
+        ("8th lord", "8th_lord", eighth_lord),
+        ("11th lord", "11th_lord", eleventh_lord),
+        ("12th lord", "12th_lord", twelfth_lord),
+    ):
+        lord_name = lord_data.get("lord")
+        placement = lord_data.get("lord_placement", {})
+        _collect_lord_signals(
+            lord_name=lord_name,
+            lord_house=placement.get("house"),
+            lord_dignity=dignities.get(lord_key, {}).get("dignity"),
+            house_label=lord_label,
+            supportive_signals=supportive_signals,
+            challenging_signals=challenging_signals,
+        )
+
+    for chart_label, chart in (("D1", d1), ("D2", d2), ("D4", d4), ("D9", d9), ("D10", d10)):
+        planets = chart.get("planets", chart)
+        for planet_name in ("moon", "mercury", "venus", "jupiter", "saturn", "rahu"):
+            planet_data = planets.get(planet_name, {})
+            _collect_planet_signals(
+                planet_name=planet_name,
+                dignity=dignities.get(planet_name, {}).get("dignity") if chart_label == "D1" else None,
+                house_num=planet_data.get("house"),
+                chart_label=chart_label,
+                supportive_signals=supportive_signals,
+                challenging_signals=challenging_signals,
+            )
+
+    second_lord_name = second_lord.get("lord")
+    saturn_aspects = aspects.get("saturn", {}).get("planets", [])
+    if second_lord_name and second_lord_name in saturn_aspects:
+        challenging_signals.append(f"Saturn directly aspects the 2nd-house zone through {second_lord_name}.")
+
+    current_stack = _current_dasha_stack(dashas)
+    wealth_lords = ["venus", "jupiter", "moon"]
+    windows = _supportive_mahadasha_windows(dashas, set(wealth_lords))
+
+    for house_num, label in (("2", "2nd"), ("11", "11th")):
+        points = ashtakavarga_houses.get(house_num, {}).get("points")
+        if points is None:
+            continue
+        if points >= 28:
+            supportive_signals.append(f"Ashtakavarga supports the {label} house with {points} SAV points.")
+        elif points <= 24:
+            challenging_signals.append(f"Ashtakavarga weakens the {label} house with only {points} SAV points.")
+
+    for item in wealth_dasha_links:
+        tags = set(item.get("link_tags", []))
+        active_lord = item.get("active_lord")
+        if item.get("is_direct_wealth_lord"):
+            supportive_signals.append(f"Current {item.get('period')} lord {active_lord} is a direct wealth lord.")
+        elif tags & {"conjunct_2nd_lord", "conjunct_11th_lord", "aspects_2nd_lord", "aspects_11th_lord"}:
+            supportive_signals.append(
+                f"Current {item.get('period')} lord {active_lord} links with wealth lords via {', '.join(sorted(tags))}."
+            )
+        elif item.get("active_lord_house") in {6, 8, 12}:
+            challenging_signals.append(
+                f"Current {item.get('period')} lord {active_lord} operates from house {item.get('active_lord_house')}."
+            )
+
+    if gandanta:
+        flagged = ", ".join(item.get("planet", "") for item in gandanta[:3] if item.get("planet"))
+        challenging_signals.append(f"Gandanta sensitivity is present for: {flagged}.")
+
+    confidence = _confidence_from_signal_balance(
+        len(supportive_signals),
+        len(challenging_signals),
+    )
+
+    return {
+        "mode": "real",
+        "question_type": "wealth",
+        "ready_for_model": True,
+        "confidence": confidence,
+        "focus": {
+            "wealth_houses": ["2", "4", "11", "12"],
+            "liquidity_planets": ["moon", "mercury", "jupiter"],
+            "debt_indicators": ["6th_house", "8th_house", "rahu"],
+            "dasha_wealth_lords": wealth_lords,
+        },
+        "structured_facts": {
+            "d1_wealth_lords": {
+                "2": second_lord,
+                "4": fourth_lord,
+                "6": sixth_lord,
+                "8": eighth_lord,
+                "11": eleventh_lord,
+                "12": twelfth_lord,
+            },
+            "d1_wealth_houses": {
+                "2": second_house,
+                "4": fourth_house,
+                "6": sixth_house,
+                "8": eighth_house,
+                "11": eleventh_house,
+                "12": twelfth_house,
+            },
+            "d1_core_planets": {
+                "moon": d1.get("moon", {}),
+                "mercury": d1.get("mercury", {}),
+                "venus": d1.get("venus", {}),
+                "jupiter": d1.get("jupiter", {}),
+                "saturn": d1.get("saturn", {}),
+                "rahu": d1.get("rahu", {}),
+            },
+            "d2_core_planets": d2.get("planets", {}),
+            "d4_asset_planets": d4.get("planets", {}),
+            "d9_core_planets": d9.get("planets", {}),
+            "d10_core_planets": d10.get("planets", {}),
+            "d1_dignities": dignities,
+            "career_aspects": aspects,
+            "ashtakavarga_summary": ashtakavarga_houses,
+            "gandanta": gandanta,
+            "current_dasha_wealth_links": wealth_dasha_links,
+            "current_dasha_stack": current_stack,
+            "supportive_mahadasha_windows": windows,
+        },
+        "supportive_signals": supportive_signals,
+        "challenging_signals": challenging_signals,
+        "model_guidance": [
+            "Focus on wealth accumulation, cash flow, savings pressure, and debt exposure rather than generic career themes.",
+            "Use D2 for liquid resources, D4 for assets/property, and D1 for house-lord context without drifting into unrelated career themes.",
+            "Use only the compact Ashtakavarga and Gandanta summaries provided here; do not invent extra strength systems.",
+            "Discuss timing as likely financial phases, not exact promises.",
         ],
         "metadata": metadata,
     }
@@ -1031,25 +1228,58 @@ def _relationship_features(evidence: dict[str, Any], metadata: dict[str, Any]) -
             challenging_signals=challenging_signals,
         )
 
+    d9_fifth_sign = d9.get("5th_house", {}).get("sign")
+    d9_fifth_occupants = d9.get("5th_house", {}).get("occupants", [])
+    d9_fifth_lord = d9.get("5th_lord", {}).get("lord")
+    d9_fifth_lord_house = d9.get("5th_lord", {}).get("placement", {}).get("house")
+    d9_fifth_lord_strength = d9.get("5th_lord", {}).get("sign_strength")
     d9_seventh_sign = d9.get("7th_house", {}).get("sign")
     d9_seventh_occupants = d9.get("7th_house", {}).get("occupants", [])
     d9_seventh_lord = d9.get("7th_lord", {}).get("lord")
     d9_seventh_lord_house = d9.get("7th_lord", {}).get("placement", {}).get("house")
-    d9_venus_house = d9.get("venus", {}).get("house")
+    d9_seventh_lord_strength = d9.get("7th_lord", {}).get("sign_strength")
+    d9_ninth_sign = d9.get("9th_house", {}).get("sign")
+    d9_ninth_occupants = d9.get("9th_house", {}).get("occupants", [])
+    d9_ninth_lord = d9.get("9th_lord", {}).get("lord")
+    d9_ninth_lord_house = d9.get("9th_lord", {}).get("placement", {}).get("house")
+    d9_ninth_lord_strength = d9.get("9th_lord", {}).get("sign_strength")
+    d9_venus = d9.get("venus", {})
+    d9_venus_house = d9_venus.get("house")
+    d9_venus_strength = d9_venus.get("sign_strength")
 
+    if d9_fifth_occupants:
+        supportive_signals.append(f"D9 5th house occupants: {', '.join(d9_fifth_occupants)}.")
     if d9_seventh_occupants:
         supportive_signals.append(f"D9 7th house occupants: {', '.join(d9_seventh_occupants)}.")
+    if d9_ninth_occupants:
+        supportive_signals.append(f"D9 9th house occupants: {', '.join(d9_ninth_occupants)}.")
+    _collect_lord_signals(
+        lord_name=d9_fifth_lord,
+        lord_house=d9_fifth_lord_house,
+        lord_dignity=d9_fifth_lord_strength,
+        house_label="D9 5th lord",
+        supportive_signals=supportive_signals,
+        challenging_signals=challenging_signals,
+    )
     _collect_lord_signals(
         lord_name=d9_seventh_lord,
         lord_house=d9_seventh_lord_house,
-        lord_dignity=None,
+        lord_dignity=d9_seventh_lord_strength,
         house_label="D9 7th lord",
+        supportive_signals=supportive_signals,
+        challenging_signals=challenging_signals,
+    )
+    _collect_lord_signals(
+        lord_name=d9_ninth_lord,
+        lord_house=d9_ninth_lord_house,
+        lord_dignity=d9_ninth_lord_strength,
+        house_label="D9 9th lord",
         supportive_signals=supportive_signals,
         challenging_signals=challenging_signals,
     )
     _collect_planet_signals(
         planet_name="venus",
-        dignity=None,
+        dignity=d9_venus_strength,
         house_num=d9_venus_house,
         chart_label="D9",
         supportive_signals=supportive_signals,
@@ -1086,13 +1316,28 @@ def _relationship_features(evidence: dict[str, Any], metadata: dict[str, Any]) -
             "d1_venus": d1.get("venus", {}),
             "d1_moon": d1.get("moon", {}),
             "d1_jupiter": d1.get("jupiter", {}),
+            "d9_5th_house_sign": d9_fifth_sign,
+            "d9_5th_house_occupants": d9_fifth_occupants,
+            "d9_5th_lord": {
+                "lord": d9_fifth_lord,
+                "house": d9_fifth_lord_house,
+                "sign_strength": d9_fifth_lord_strength,
+            },
             "d9_7th_house_sign": d9_seventh_sign,
             "d9_7th_house_occupants": d9_seventh_occupants,
             "d9_7th_lord": {
                 "lord": d9_seventh_lord,
                 "house": d9_seventh_lord_house,
+                "sign_strength": d9_seventh_lord_strength,
             },
-            "d9_venus_house": d9_venus_house,
+            "d9_9th_house_sign": d9_ninth_sign,
+            "d9_9th_house_occupants": d9_ninth_occupants,
+            "d9_9th_lord": {
+                "lord": d9_ninth_lord,
+                "house": d9_ninth_lord_house,
+                "sign_strength": d9_ninth_lord_strength,
+            },
+            "d9_venus": d9_venus,
             "current_dasha_stack": current_stack,
             "supportive_mahadasha_windows": windows,
         },
@@ -1118,9 +1363,14 @@ def _marriage_timing_features(evidence: dict[str, Any], metadata: dict[str, Any]
     seventh_lord_name = seventh_lord.get("lord")
     seventh_lord_house = seventh_lord.get("lord_placement", {}).get("house")
     venus_house_d1 = d1.get("venus", {}).get("house")
+    d9_fifth_lord = d9.get("5th_lord", {}).get("lord")
+    d9_fifth_lord_house = d9.get("5th_lord", {}).get("placement", {}).get("house")
+    d9_fifth_lord_strength = d9.get("5th_lord", {}).get("sign_strength")
     d9_seventh_lord = d9.get("7th_lord", {}).get("lord")
     d9_seventh_lord_house = d9.get("7th_lord", {}).get("placement", {}).get("house")
-    d9_venus_house = d9.get("venus", {}).get("house")
+    d9_seventh_lord_strength = d9.get("7th_lord", {}).get("sign_strength")
+    d9_venus = d9.get("venus", {})
+    d9_venus_house = d9_venus.get("house")
 
     supportive_signals: list[str] = []
     challenging_signals: list[str] = []
@@ -1150,14 +1400,22 @@ def _marriage_timing_features(evidence: dict[str, Any], metadata: dict[str, Any]
     _collect_lord_signals(
         lord_name=d9_seventh_lord,
         lord_house=d9_seventh_lord_house,
-        lord_dignity=None,
+        lord_dignity=d9_seventh_lord_strength,
         house_label="D9 7th lord",
+        supportive_signals=supportive_signals,
+        challenging_signals=challenging_signals,
+    )
+    _collect_lord_signals(
+        lord_name=d9_fifth_lord,
+        lord_house=d9_fifth_lord_house,
+        lord_dignity=d9_fifth_lord_strength,
+        house_label="D9 5th lord",
         supportive_signals=supportive_signals,
         challenging_signals=challenging_signals,
     )
     _collect_planet_signals(
         planet_name="venus",
-        dignity=None,
+        dignity=d9_venus.get("sign_strength"),
         house_num=d9_venus_house,
         chart_label="D9",
         supportive_signals=supportive_signals,
@@ -1198,13 +1456,24 @@ def _marriage_timing_features(evidence: dict[str, Any], metadata: dict[str, Any]
             "d1_marriage_indicators": d1,
             "vimshottari_timing": dashas,
             "d9_marriage_confirmation": d9,
+            "d9_5th_lord": {
+                "lord": d9_fifth_lord,
+                "house": d9_fifth_lord_house,
+                "sign_strength": d9_fifth_lord_strength,
+            },
+            "d9_7th_lord": {
+                "lord": d9_seventh_lord,
+                "house": d9_seventh_lord_house,
+                "sign_strength": d9_seventh_lord_strength,
+            },
+            "d9_venus": d9_venus,
             "optional_jupiter_saturn_transits": transits,
             "supportive_mahadasha_windows": windows,
         },
         "supportive_signals": supportive_signals,
         "challenging_signals": challenging_signals,
         "model_guidance": [
-            "Use only D1 7th house, 7th lord, Venus, Vimshottari timing, D9 7th house/7th lord, and optional Jupiter-Saturn transits.",
+            "Use D1 7th house and Venus with D9 5th/7th confirmation, Vimshottari timing, and optional Jupiter-Saturn transits.",
             "Do not introduce extra charts or extra marriage factors not present in the structured facts.",
             "Prefer timing windows over a single certain date.",
         ],
@@ -1296,7 +1565,7 @@ def _supportive_mahadasha_windows(dashas: dict[str, Any], supportive_lords: set[
 
 
 def _current_dasha_stack(dashas: dict[str, Any]) -> list[str]:
-    return [
+    direct_stack = [
         value
         for value in (
             dashas.get("current_mahadasha"),
@@ -1305,6 +1574,16 @@ def _current_dasha_stack(dashas: dict[str, Any]) -> list[str]:
         )
         if value
     ]
+    if direct_stack:
+        return direct_stack
+
+    current_periods = dashas.get("current_periods", {})
+    stack: list[str] = []
+    for period_name in ("mahadasha", "antardasha", "pratyantardasha"):
+        lords = current_periods.get(period_name, {}).get("lords", [])
+        if lords:
+            stack.append(lords[-1])
+    return stack
 
 
 def _confidence_from_signal_balance(supportive_count: int, challenging_count: int) -> str:
