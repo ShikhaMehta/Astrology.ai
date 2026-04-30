@@ -243,6 +243,7 @@ def _compact_career_features(evidence: dict[str, Any], metadata: dict[str, Any])
     d9 = evidence.get("career.d9", {})
     d10 = evidence.get("career.d10", {})
     dashas = evidence.get("career.dashas", {})
+    transit_window = evidence.get("career.transit_window", {})
 
     dignities = d1.get("dignities", {})
     aspects = d1.get("career_aspects", {})
@@ -307,6 +308,12 @@ def _compact_career_features(evidence: dict[str, Any], metadata: dict[str, Any])
     )
     current_overlap = sorted(set(current_stack) & set(career_significators))
     windows = _supportive_mahadasha_windows(dashas, set(career_significators))
+    transit_window_summary = _career_transit_window_summary(transit_window)
+    if transit_window_summary:
+        supportive_signals.append(
+            f"Transit window loaded for {transit_window_summary.get('requested_range', {}).get('start_date')} "
+            f"to {transit_window_summary.get('requested_range', {}).get('end_date')}."
+        )
     confidence = _confidence_from_signal_balance(
         len(supportive_signals),
         len(challenging_signals),
@@ -343,6 +350,7 @@ def _compact_career_features(evidence: dict[str, Any], metadata: dict[str, Any])
             "career_aspects": aspects,
             "current_dasha_stack": current_stack,
             "supportive_mahadasha_windows": windows,
+            "transit_window_summary": transit_window_summary,
         },
         "supportive_signals": supportive_signals,
         "challenging_signals": challenging_signals,
@@ -350,6 +358,7 @@ def _compact_career_features(evidence: dict[str, Any], metadata: dict[str, Any])
             "Focus on profession, work pattern, and career growth rather than unrelated life areas.",
             "Use D10 as the main confirmation chart and D2 only as support for income and resources.",
             "Discuss timing as likely periods, not exact promises.",
+            "If a transit window is present, use it for short-period trend calls instead of relying only on the current transit snapshot.",
         ],
         "metadata": metadata,
     }
@@ -1584,6 +1593,58 @@ def _current_dasha_stack(dashas: dict[str, Any]) -> list[str]:
         if lords:
             stack.append(lords[-1])
     return stack
+
+
+def _career_transit_window_summary(window: dict[str, Any]) -> dict[str, Any]:
+    snapshots = window.get("snapshots", [])
+    if not snapshots:
+        return {}
+
+    target_totals = {
+        "jupiter_to_10th": 0,
+        "saturn_to_10th": 0,
+        "rahu_to_10th": 0,
+        "jupiter_to_11th": 0,
+        "saturn_to_11th": 0,
+        "jupiter_to_2nd": 0,
+        "saturn_to_2nd": 0,
+    }
+    for snapshot in snapshots:
+        major_planets = snapshot.get("major_planets", {})
+        for planet_name, prefix in (("jupiter", "jupiter"), ("saturn", "saturn"), ("rahu", "rahu")):
+            planet_data = major_planets.get(planet_name, {})
+            targets = planet_data.get("targets", {})
+            if targets.get("10th_house_sign", {}).get("occupies") or targets.get("10th_house_sign", {}).get("aspects"):
+                key = f"{prefix}_to_10th"
+                if key in target_totals:
+                    target_totals[key] += 1
+            if planet_name in {"jupiter", "saturn"} and (
+                targets.get("11th_house_sign", {}).get("occupies")
+                or targets.get("11th_house_sign", {}).get("aspects")
+            ):
+                target_totals[f"{prefix}_to_11th"] += 1
+            if planet_name in {"jupiter", "saturn"} and (
+                targets.get("2nd_house_sign", {}).get("occupies")
+                or targets.get("2nd_house_sign", {}).get("aspects")
+            ):
+                target_totals[f"{prefix}_to_2nd"] += 1
+
+    strongest = sorted(
+        (
+            {"signal": key, "months": value}
+            for key, value in target_totals.items()
+            if value
+        ),
+        key=lambda item: item["months"],
+        reverse=True,
+    )[:5]
+
+    return {
+        "requested_range": window.get("requested_range", {}),
+        "request_source": window.get("request_source", "unknown"),
+        "snapshot_count": window.get("snapshot_count", len(snapshots)),
+        "strongest_repeating_transit_links": strongest,
+    }
 
 
 def _confidence_from_signal_balance(supportive_count: int, challenging_count: int) -> str:

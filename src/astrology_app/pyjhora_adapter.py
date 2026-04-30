@@ -7,7 +7,7 @@ Depends on PyJHora, pyswisseph, geopy, and geocoder (jhora imports jhora.utils).
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -181,6 +181,105 @@ def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
             "Current transit snapshot is included as present-time gochara support.",
             "Sudarshana Chakra is included as a normalized current-cycle composite reference.",
         ],
+    }
+
+
+def build_requested_transit_window(
+    birth_input: BirthInput,
+    *,
+    start_date: str,
+    end_date: str,
+    step: str = "monthly",
+) -> dict:
+    jhora_const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
+
+    lat, lon = _resolved_coordinates(birth_input)
+    tz_hours = _timezone_offset_hours_at_birth(
+        birth_input.timezone,
+        birth_input.date_of_birth,
+        birth_input.time_of_birth,
+    )
+    place = drik.Place(birth_input.birth_place, lat, lon, tz_hours)
+    birth_d1 = _birth_d1_positions(birth_input, place)
+    lagna_sign_d1 = int(birth_d1[0][1][0])
+    moon_sign_d1 = int(
+        next(entry for entry in birth_d1[1:] if int(entry[0]) == jhora_const.MOON_ID)[1][0]
+    )
+    natal_house_signs = {
+        "2nd_house_sign": (lagna_sign_d1 + 1) % 12,
+        "6th_house_sign": (lagna_sign_d1 + 5) % 12,
+        "10th_house_sign": (lagna_sign_d1 + 9) % 12,
+        "11th_house_sign": (lagna_sign_d1 + 10) % 12,
+    }
+
+    step_name = step.strip().lower() or "monthly"
+    if step_name not in {"daily", "weekly", "monthly"}:
+        raise ValueError("Requested transit window step must be 'daily', 'weekly', or 'monthly'.")
+
+    start_parts = _parse_ymd(start_date)
+    end_parts = _parse_ymd(end_date)
+    start_marker = date(*start_parts)
+    end_marker = date(*end_parts)
+    if end_marker < start_marker:
+        raise ValueError("Transit window end_date must be on or after start_date.")
+
+    snapshots: list[dict[str, Any]] = []
+    cursor = _normalized_window_start(start_marker, step_name)
+    while cursor <= end_marker:
+        ref_jd = _jd_from_local_datetime(
+            tz_name=birth_input.timezone,
+            year=cursor.year,
+            month=cursor.month,
+            day=cursor.day,
+            hour=12,
+        )
+        transit_positions = charts.divisional_chart(ref_jd, place, divisional_chart_factor=1)
+        retrograde_planets = [
+            _planet_name(int(pid))
+            for pid in drik.planets_in_retrograde(ref_jd, place)
+            if int(pid) in PLANET_NAMES
+        ]
+        snapshots.append(
+            {
+                "reference_date": {
+                    "year": cursor.year,
+                    "month": cursor.month,
+                    "day": cursor.day,
+                    "fractional_hour": 12.0,
+                    "timezone": birth_input.timezone,
+                },
+                "chart": _serialize_chart(
+                    positions=transit_positions,
+                    lagna_sign=int(transit_positions[0][1][0]),
+                    include_nakshatra_pada=False,
+                ),
+                "retrograde_planets": retrograde_planets,
+                "natal_house_reference": _transit_natal_house_reference(
+                    transit_positions=transit_positions,
+                    lagna_sign_d1=lagna_sign_d1,
+                    moon_sign_d1=moon_sign_d1,
+                    natal_house_signs=natal_house_signs,
+                ),
+            }
+        )
+        cursor = _next_window_step(cursor, step_name)
+
+    return {
+        "requested_range": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "step": step_name,
+        },
+        "reference_method": _window_reference_method(step_name),
+        "natal_reference": {
+            "lagna_sign": _sign_name_from_index(lagna_sign_d1),
+            "moon_sign": _sign_name_from_index(moon_sign_d1),
+            "career_house_signs": {
+                key: _sign_name_from_index(sign_idx)
+                for key, sign_idx in natal_house_signs.items()
+            },
+        },
+        "snapshots": snapshots,
     }
 
 
@@ -484,6 +583,34 @@ def _jd_from_local_datetime(
     )
 
 
+def _first_day_of_next_month(value: date) -> date:
+    if value.month == 12:
+        return date(value.year + 1, 1, 1)
+    return date(value.year, value.month + 1, 1)
+
+
+def _normalized_window_start(value: date, step: str) -> date:
+    if step == "monthly":
+        return date(value.year, value.month, 1)
+    return value
+
+
+def _next_window_step(value: date, step: str) -> date:
+    if step == "daily":
+        return value + timedelta(days=1)
+    if step == "weekly":
+        return value + timedelta(days=7)
+    return _first_day_of_next_month(value)
+
+
+def _window_reference_method(step: str) -> str:
+    if step == "daily":
+        return "Daily snapshot at 12:00 local time."
+    if step == "weekly":
+        return "Weekly snapshot every 7 days at 12:00 local time."
+    return "Monthly snapshot on day 1 at 12:00 local time."
+
+
 def _completed_years_at_now(birth_input: BirthInput) -> int:
     y, m, d = _parse_ymd(birth_input.date_of_birth)
     hh, mm = _parse_hm(birth_input.time_of_birth)
@@ -550,6 +677,51 @@ def _serialize_sudarshana_chart(chart_rows: list[tuple[int, str]]) -> list[dict]
             }
         )
     return serialized
+
+
+def _birth_d1_positions(birth_input: BirthInput, place) -> list:
+    y, m, d = _parse_ymd(birth_input.date_of_birth)
+    hh, mm = _parse_hm(birth_input.time_of_birth)
+    jd = _julian_day_number((y, m, d), (hh, mm, 0))
+    return charts.divisional_chart(
+        jd,
+        place,
+        divisional_chart_factor=1,
+        chart_method=1,
+    )
+
+
+def _transit_natal_house_reference(
+    *,
+    transit_positions: list,
+    lagna_sign_d1: int,
+    moon_sign_d1: int,
+    natal_house_signs: dict[str, int],
+) -> dict[str, dict[str, Any]]:
+    house_to_planet = jhora_utils.get_house_planet_list_from_planet_positions(transit_positions)
+    summary: dict[str, dict[str, Any]] = {}
+    for pid, (sign, _lon) in transit_positions[1:]:
+        planet_id = int(pid)
+        if not _is_supported_planet(planet_id):
+            continue
+        sign_idx = int(sign)
+        aspected_signs = {
+            int(value)
+            for value in jhora_house.aspected_rasis_of_the_planet(house_to_planet, planet_id)
+        }
+        summary[_planet_name(planet_id)] = {
+            "sign": _sign_name_from_index(sign_idx),
+            "house_from_natal_lagna": (sign_idx - lagna_sign_d1) % 12 + 1,
+            "house_from_natal_moon": (sign_idx - moon_sign_d1) % 12 + 1,
+            "targets": {
+                key: {
+                    "occupies": sign_idx == house_sign,
+                    "aspects": house_sign in aspected_signs,
+                }
+                for key, house_sign in natal_house_signs.items()
+            },
+        }
+    return summary
 
 
 def _current_transit_summary(jd_now: float, place, tz_name: str) -> dict:

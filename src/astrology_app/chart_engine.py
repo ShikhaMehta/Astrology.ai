@@ -86,10 +86,11 @@ def build_chart_engine() -> ChartEngine:
 
 
 def _pyjhora_runtime_available() -> bool:
-    try:
-        import_module("swisseph")
-    except ModuleNotFoundError:
-        return False
+    for module_name in ("swisseph", "pytz"):
+        try:
+            import_module(module_name)
+        except ModuleNotFoundError:
+            return False
 
     for module_name in ("jhora", "pyhora"):
         try:

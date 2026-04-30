@@ -9,3 +9,6 @@ timezonefinder
 # or install Microsoft C++ Build Tools first.
 # PyJHora itself may be installed from the vendored wheel if needed:
 #   pip install vendor/wheels/pyjhora-4.8.0-py3-none-any.whl
+# The real-engine path also expects:
+#   pip install pytz
+#   pip install python-dateutil

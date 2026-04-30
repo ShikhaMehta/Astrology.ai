@@ -18,6 +18,8 @@ dependencies = [
 jhora = [
     "PyJHora==4.8.0",
     "pyswisseph>=2.10.3.2",
+    "pytz",
+    "python-dateutil",
 ]
 
 [tool.setuptools]

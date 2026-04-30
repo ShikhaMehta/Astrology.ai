@@ -245,8 +245,16 @@ def _evidence_scope_lines(payload: dict[str, Any]) -> list[str]:
     else:
         included.append("Structured feature extractor status: this question does not yet have a dedicated extractor, so rely only on the provided evidence keys.")
 
+    transits = chart_package.get("relevant_sections", {}).get("career.transit_window", {})
+    if transits:
+        included.append(
+            "Included transits: requested monthly transit ephemeris window for the specified prediction range."
+        )
+    else:
+        included.append("Included transits: only the default current snapshot when explicitly shown in the selected evidence.")
+
     excluded = [
-        "Not included: transits (gochara).",
+        "Not included: extra transit windows beyond those explicitly attached to this export.",
         "Not included: annual charts / varshaphala.",
         "Not included: ashtakavarga, shadbala, or other strength systems unless explicitly shown in the data.",
         "Not included: event rectification or life-history confirmation.",

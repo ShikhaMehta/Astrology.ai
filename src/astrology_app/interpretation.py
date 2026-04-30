@@ -446,7 +446,8 @@ def _compact_career_evidence(chart_package: dict[str, Any]) -> dict[str, Any]:
     ashtakavarga = chart_package.get("derived", {}).get("ashtakavarga", {})
     special_conditions = chart_package.get("derived", {}).get("special_conditions", {})
     dashas = chart_package.get("dashas", {})
-    return {
+    transits = chart_package.get("transits", {})
+    evidence = {
         "career.d1": {
             "ascendant": d1.get("ascendant", {}),
             "2nd_house": houses.get("2", {}),
@@ -523,6 +524,10 @@ def _compact_career_evidence(chart_package: dict[str, Any]) -> dict[str, Any]:
             ),
         },
     }
+    requested_window = _compact_requested_transit_window(transits.get("requested_window", {}))
+    if requested_window:
+        evidence["career.transit_window"] = requested_window
+    return evidence
 
 
 def _compact_relationship_evidence(chart_package: dict[str, Any]) -> dict[str, Any]:
@@ -1025,6 +1030,37 @@ def _compact_marriage_timing_transits(transits: dict[str, Any], d1: dict[str, An
             "venus_sign": natal_venus.get("sign"),
             "venus_house": natal_venus.get("house"),
         },
+    }
+
+
+def _compact_requested_transit_window(window: dict[str, Any]) -> dict[str, Any]:
+    snapshots = window.get("snapshots", [])
+    if not snapshots:
+        return {}
+
+    compact_snapshots: list[dict[str, Any]] = []
+    for snapshot in snapshots:
+        reference_date = snapshot.get("reference_date", {})
+        natal_reference = snapshot.get("natal_house_reference", {})
+        compact_snapshots.append(
+            {
+                "reference_date": reference_date,
+                "retrograde_planets": snapshot.get("retrograde_planets", []),
+                "major_planets": {
+                    planet_name: natal_reference.get(planet_name, {})
+                    for planet_name in ("jupiter", "saturn", "rahu", "ketu", "mars")
+                    if natal_reference.get(planet_name)
+                },
+            }
+        )
+
+    return {
+        "requested_range": window.get("requested_range", {}),
+        "request_source": window.get("request_source", "unknown"),
+        "reference_method": window.get("reference_method", ""),
+        "natal_reference": window.get("natal_reference", {}),
+        "snapshot_count": len(snapshots),
+        "snapshots": compact_snapshots,
     }
 
 
