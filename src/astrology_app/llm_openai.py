@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date
 from typing import Any
 from urllib import error, request
 
@@ -27,6 +28,9 @@ def generate_openai_answer(
     category: str,
     reading_input: dict[str, Any],
     evidence: dict[str, Any],
+    client_context: str | None = None,
+    birth_input: dict[str, Any] | None = None,
+    user_details: dict[str, Any] | None = None,
 ) -> str:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -55,6 +59,9 @@ def generate_openai_answer(
                         "text": _user_prompt(
                             question=question,
                             category=category,
+                            client_context=client_context,
+                            birth_input=birth_input or {},
+                            user_details=user_details or {},
                             reading_input=reading_input,
                             evidence=evidence,
                         ),
@@ -101,12 +108,8 @@ def generate_openai_answer(
 def _developer_instructions() -> str:
     return (
         "You are a Vedic astrology interpretation assistant. "
-        "Use only the structured facts and signals supplied by the application. "
-        "Do not invent additional chart placements, yogas, doshas, transits, or timing factors. "
-        "Do not make deterministic or fear-based claims. "
-        "If the evidence is mixed or weak, say so clearly. "
-        "Do not claim an exact year unless the provided structured evidence clearly supports only a narrow timing window. "
-        "Always cite the specific signals you relied on."
+        "Answer the user's astrology question using the supplied birth details and chart evidence. "
+        "Please include details from both the past and the future when the chart evidence supports it."
     )
 
 
@@ -114,22 +117,33 @@ def _user_prompt(
     *,
     question: str,
     category: str,
+    client_context: str | None,
+    birth_input: dict[str, Any],
+    user_details: dict[str, Any],
     reading_input: dict[str, Any],
     evidence: dict[str, Any],
 ) -> str:
+    context_block = ""
+    if client_context:
+        context_block = (
+            "Known life context / client facts:\n"
+            f"{client_context.strip()}\n"
+            "\n\n"
+        )
     return (
         f"User question: {question}\n"
         f"Question category: {category}\n\n"
+        f"Reading date: {date.today().isoformat()}\n\n"
+        "Birth details:\n"
+        f"{json.dumps(birth_input, indent=2)}\n\n"
+        "All user details supplied:\n"
+        f"{json.dumps(user_details, indent=2)}\n\n"
+        f"{context_block}"
         "Selected chart evidence:\n"
         f"{json.dumps(evidence, indent=2)}\n\n"
         "Structured reading input:\n"
         f"{json.dumps(reading_input, indent=2)}\n\n"
-        "Answer in this format:\n"
-        "1. Summary\n"
-        "2. Key evidence\n"
-        "3. Timing windows\n"
-        "4. Confidence\n"
-        "5. Limits\n"
+        "Please organize the answer with past observations first, then future possibilities.\n"
     )
 
 

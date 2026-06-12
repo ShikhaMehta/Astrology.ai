@@ -1,97 +1,81 @@
 # Astrology.ai Design Notes
 
-This document reflects the current codebase and the working local setup path that now produces real computed charts through PyJHora.
+This document reflects the current local codebase: a desktop-first Python CLI that turns birth details and a user question into Vedic chart evidence, compact interpretation input, optional OpenAI output, and local exports.
 
 ## 1. Product Snapshot
 
-`Astrology.ai` is a desktop-first Python CLI for:
+`Astrology.ai` is an evidence-first astrology assistant. Its core job is not to let an LLM freely reason over a huge raw chart dump. Instead, it computes a chart package, selects the evidence relevant to the question, extracts structured signals, and gives the model a constrained prompt with explicit scope limits.
 
-1. collecting birth details
-2. validating and normalizing them
-3. generating Vedic chart data through a pluggable engine
-4. selecting question-relevant chart evidence
-5. preparing a constrained interpretation context for a future LLM layer
+Current user workflows:
 
-The app does not yet call an LLM directly. It currently stops at evidence selection and prompt preview.
+1. Interactive CLI: `python -m astrology_app.main`
+2. Scripted local runner: `python bin/run_saved_query.py`
+3. Optional OpenAI answer when `OPENAI_API_KEY` is configured
+4. Local exports in JSON, Markdown, and copy/paste prompt formats
 
-## 2. Current Working Architecture
+## 2. Current Architecture
 
 Core modules:
 
-- [`src/astrology_app/main.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/main.py)
-  - CLI orchestration
-- [`src/astrology_app/models.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/models.py)
-  - `BirthInput`, `QuestionCategory`
-- [`src/astrology_app/validation.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/validation.py)
-  - validation, geocoding-driven timezone resolution, normalized input construction
-- [`src/astrology_app/geocoding_utils.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/geocoding_utils.py)
-  - Nominatim geocoding and `timezonefinder` lookup
-- [`src/astrology_app/chart_engine.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/chart_engine.py)
-  - engine selection and fallback behavior
-- [`src/astrology_app/pyjhora_adapter.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/pyjhora_adapter.py)
-  - real chart generation and normalization
-- [`src/astrology_app/question_router.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/question_router.py)
-  - question classification and evidence-path selection
-- [`src/astrology_app/interpretation.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/interpretation.py)
-  - evidence extraction and prompt scaffolding
-- [`src/astrology_app/session_store.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/session_store.py)
-  - session-only in-memory state
+- [`src/astrology_app/main.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/main.py): interactive CLI orchestration.
+- [`bin/run_saved_query.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/bin/run_saved_query.py): repeatable file-edited query runner.
+- [`src/astrology_app/models.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/models.py): `BirthInput` and `QuestionCategory`.
+- [`src/astrology_app/validation.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/validation.py): validation, geocoding-driven timezone resolution, normalized input construction.
+- [`src/astrology_app/geocoding_utils.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/geocoding_utils.py): Nominatim geocoding and `timezonefinder` lookup.
+- [`src/astrology_app/chart_engine.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/chart_engine.py): real/mock engine selection and fallback behavior.
+- [`src/astrology_app/pyjhora_adapter.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/pyjhora_adapter.py): real chart generation and normalization.
+- [`src/astrology_app/question_router.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/question_router.py): keyword category routing and evidence-path selection.
+- [`src/astrology_app/interpretation.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/interpretation.py): compact evidence extraction and prompt scaffolding.
+- [`src/astrology_app/question_features.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/question_features.py): structured reading input by question type.
+- [`src/astrology_app/llm_openai.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/llm_openai.py): optional OpenAI Responses API call.
+- [`src/astrology_app/export_utils.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/export_utils.py): compact export writer.
+- [`src/astrology_app/session_store.py`](/c:/Users/Shikha/AstrologyApp/Astrology.ai/src/astrology_app/session_store.py): session-only in-memory state.
 
-## 3. Engine Strategy
+## 3. Runtime Flow
 
-The engine layer is now explicitly three-mode:
+Interactive flow:
 
-- `ASTROLOGY_ENGINE=auto`
-  - default
-  - uses the real engine when dependencies are installed
-  - falls back to `mock` when they are not
-- `ASTROLOGY_ENGINE=jhora`
-  - forces real PyJHora chart generation
-- `ASTROLOGY_ENGINE=mock`
-  - forces placeholder data
+1. Collect birth details and question.
+2. Normalize and validate date, time, place, and timezone.
+3. Build the selected chart engine.
+4. Generate the normalized chart package.
+5. Categorize the question.
+6. Select relevant chart/evidence keys.
+7. Build the compact interpretation context.
+8. Build structured `reading_input`.
+9. Generate a deterministic local interpretation answer.
+10. Build an LLM prompt preview.
+11. Optionally call OpenAI.
+12. Save compact exports.
 
-This adapter boundary is important because it keeps the rest of the application independent from PyJHora internals.
+Scripted flow is the same, but birth details and the question come from `QUERY_CONFIG`. The scripted runner can also attach `requested_chart_keys`, an `answer_style`, and an optional transit `prediction_window`; requested charts are appended only when that chart is not already represented in the selected evidence.
 
-## 4. Input Resolution Flow
+## 4. Engine Strategy
 
-The effective runtime flow is now:
+The engine layer has three modes:
 
-1. validate date format
-2. validate time format
-3. validate place structure
-4. geocode the place with Nominatim
-5. resolve timezone
-   - use user-entered alias or IANA zone if valid
-   - otherwise infer timezone from coordinates
-6. return a fully populated `BirthInput` including:
-   - `timezone_source`
-   - `latitude`
-   - `longitude`
+- `ASTROLOGY_ENGINE=auto`: default behavior, uses PyJHora if available and falls back to mock.
+- `ASTROLOGY_ENGINE=jhora`: forces the real PyJHora adapter and reports setup guidance if dependencies are missing.
+- `ASTROLOGY_ENGINE=mock`: forces placeholder data for development.
 
-This is a real improvement from the earlier duplicate-definition state in `validation.py`.
+The adapter boundary keeps the rest of the application independent from PyJHora internals.
 
-## 5. Current Data Flow
+## 5. Input Resolution
 
-Actual runtime pipeline:
+The normalized input path:
 
-1. `collect_birth_input()`
-2. `normalize_and_validate_birth_input()`
-3. `build_chart_engine()`
-4. `generate_chart_package()`
-5. `categorize_question()`
-6. `select_relevant_chart_keys()`
-7. `build_interpretation_context()`
-8. `build_llm_prompt()`
+1. Validate date format.
+2. Validate time format.
+3. Validate place structure.
+4. Geocode the place with Nominatim.
+5. Resolve timezone from user input, alias, or coordinates.
+6. Return `BirthInput` with `timezone_source`, `latitude`, and `longitude`.
 
-The final output shown to the user is:
-
-- full normalized chart package
-- selected interpretation context
-- prompt preview
+Birth time is interpreted as local time at the resolved birthplace.
 
 ## 6. Chart Package Contract
 
-Top-level keys:
+Top-level real-engine keys include:
 
 - `source`
 - `input`
@@ -100,62 +84,24 @@ Top-level keys:
 - `derived`
 - `dashas`
 - `nakshatras`
+- `transits`
+- `sudarshana_chakra`
 - `notes`
 
-### `source`
+`source` values:
 
-Possible values:
-
-- `mock-engine`
 - `pyjhora-adapter`
+- `mock-engine`
 
-### `input`
-
-Now includes:
-
-- `date_of_birth`
-- `time_of_birth`
-- `birth_place`
-- `timezone`
-- `timezone_source`
-- `latitude`
-- `longitude`
-
-### `metadata`
-
-Current real-engine metadata includes:
-
-- `ayanamsha_mode: LAHIRI`
-- `dasha_system: vimshottari`
-- `charts_included`
-- `status`
-- `resolved_location`
-  - latitude
-  - longitude
-  - timezone offset at birth
+`metadata` includes ayanamsha mode, dasha system, included charts, runtime status, and resolved location details.
 
 ## 7. Real Chart Coverage
 
-The real engine now computes these divisional charts:
+The real engine currently computes:
 
-- `D1`
-- `D2`
-- `D3`
-- `D4`
-- `D7`
-- `D9`
-- `D10`
-- `D12`
-- `D16`
-- `D20`
-- `D24`
-- `D27`
-- `D30`
-- `D40`
-- `D45`
-- `D60`
+- D1, D2, D3, D4, D7, D9, D10, D12, D16, D20, D24, D27, D30, D40, D45, D60
 
-Each normalized chart currently exposes:
+Each normalized chart exposes:
 
 - ascendant sign
 - ascendant longitude in sign
@@ -163,163 +109,157 @@ Each normalized chart currently exposes:
 - per-planet longitude in sign
 - per-planet house relative to lagna
 
-For `D1`, the planet entries also include:
+D1 planet entries also include nakshatra and pada. Unsupported/non-core planet IDs are ignored instead of crashing the adapter.
 
-- nakshatra
-- pada
+## 8. Derived Features
 
-Non-core returned planet ids are safely ignored instead of crashing the adapter.
+The `derived` section currently includes:
 
-## 8. Derived D1 Features
+- houses with sign, occupants, and graha drishti received
+- house lords and lord placements
+- dignity labels and combustion flags
+- graha drishti aspects by planet
+- conjunction groups
+- ashtakavarga summary where available
+- special conditions such as gandanta where available
 
-The `derived` section now includes:
+These features are the bridge between raw chart data and question-specific reasoning.
 
-- `houses`
-  - sign
-  - occupants
-  - graha drishti received
-- `house_lords`
-  - sign
-  - lord
-  - lord placement
-- `dignities`
-  - strength label from PyJHora matrices
-  - derived dignity label
-  - combustion flag
-- `aspects`
-  - graha drishti by planet
-- `conjunctions`
-  - multi-planet house conjunctions
+## 9. Timing and Transit Support
 
-This is the main bridge between raw chart generation and useful question-specific reasoning.
+Timing layers currently include:
 
-## 9. Dasha Support
+- Vimshottari current mahadasha
+- current antardasha
+- current pratyantardasha
+- mahadasha sequence with dates
+- compact nearby dasha windows for selected prompt paths
 
-Current dasha support is Vimshottari-based and now includes:
+Transit layers currently include:
 
-- `current_mahadasha`
-- `current_antardasha`
-- `current_pratyantardasha`
-- Mahadasha sequence with start dates
+- current transit snapshot in the real chart package
+- yearly relationship timing transit support
+- scripted requested transit windows via `bin/run_saved_query.py`
 
-This makes timing questions more useful than the earlier Maha-plus-Antara-only shape.
+Requested transit windows can be daily, weekly, or monthly. The scripted runner accepts exact dates and month/year ranges like `3/2009-12/2013`; month/year ranges are expanded to the first day of the starting month and the last day of the ending month. If a compact category path does not already expose the window, it is added as `requested.transit_window`. The compact career evidence path also summarizes repeated Jupiter, Saturn, and Rahu links to natal career/resource houses when such a window is attached.
 
 ## 10. Question Routing
 
-The question router is still keyword-based, but it now selects richer evidence slices.
+The router is keyword-based and intentionally simple. It maps a question into:
+
+- personality
+- career
+- relationships
+- family
+- health
+- spiritual
+- timing
+- general
+
+Each category selects evidence keys before `interpretation.py` compacts them into a smaller category-aware shape.
 
 Examples:
 
-- career
-  - `D1`, `D2`, `D10`, derived house lords, derived dignities, aspects, dashas
-- family / children
-  - `D1`, `D7`, `D12`, derived house lords, aspects, dashas
-- spiritual
-  - `D1`, `D9`, `D20`, house lords, nakshatras, dashas
-- health
-  - `D1`, `D30`, dignities, aspects, dashas
+- Career: D1, D2, D4, D9, D10, D60, derived houses/lords/dignities/aspects, ashtakavarga, special conditions, nakshatras, dashas.
+- Relationships: D1, D7, D9, derived features, transits, nakshatras, dashas.
+- Family: D1, D3, D7, D9, D12, derived features, dashas.
+- Health: D1, D6, D8, D30, Sudarshana Chakra, transits, dashas.
+- Spiritual: D1, D9, D20, house lords, nakshatras, dashas.
 
-This is still heuristic routing, but it is materially better aligned with the actual chart package than before.
+## 11. Interpretation and LLM Layer
 
-## 11. Privacy and State
+There are three output layers:
 
-The privacy model remains:
+1. `interpretation_answer`: deterministic local text generated from structured evidence.
+2. `llm_prompt`: a copy/paste prompt preview with evidence scope and guardrails.
+3. `openai_answer`: optional OpenAI answer when `OPENAI_API_KEY` is available.
 
-- session only
+The OpenAI call uses the Responses API and sends only the selected evidence and `reading_input`. It instructs the model to avoid invented placements, yogas, doshas, transits, deterministic claims, or unsupported exact timing.
+
+## 12. Exports
+
+Every run writes a compact export set under `exports/`:
+
+- `*_session.json`: compact structured payload.
+- `*_session.md`: readable summary.
+- `*_session_for_ai.txt`: constrained prompt for external AI use.
+
+Before writing a new session, the export utility deletes previous `*_session.*` files. Exports are local files only.
+
+The export payload intentionally preserves evidence scope:
+
+- included charts
+- included evidence keys
+- included timing layers
+- included transit limits
+- missing layers that should not be inferred
+
+## 13. Privacy and State
+
+The app has:
+
+- no accounts
 - no database
-- no account system
-- no persistent reading storage
+- no remote storage owned by the app
+- in-memory runtime session state
+- local export files in the project workspace
 
-`SessionStore` is still simple in-memory state.
+If OpenAI is configured, selected evidence is sent to the OpenAI API for the optional answer.
 
-Not implemented yet:
+## 14. Local Setup Reality
 
-- TTL / expiration
-- explicit clear-session command
-- redacted structured logging
-- export flow
+Recommended baseline:
 
-## 12. Local Setup Reality
-
-The practical local setup path that worked is:
-
-- Python `3.11`
+- Python 3.11
 - virtual environment
-- project installed editable
-- optional `jhora` extras installed
-- additional runtime packages needed on Windows:
-  - `pytz`
-  - `tzdata`
-  - `python-dateutil`
+- editable project install
+- optional `jhora` extras for real chart generation
 
-Important note:
+Windows notes:
 
-- Python `3.13` on Windows is currently high-friction for `pyswisseph`
-- Python `3.11` is the recommended baseline for the real engine
+- Python 3.13 can be high-friction for `pyswisseph`.
+- `pytz`, `tzdata`, and `python-dateutil` may be needed by the PyJHora path.
+- Geocoding requires network access for new places.
 
-## 13. Strengths
+## 15. Strengths
 
-- clear engine abstraction
-- real chart generation working end to end
-- richer normalized contract than the original scaffold
-- safe mock fallback
-- better question-to-evidence routing
-- validation now actually resolves place and timezone
-- derived features bring the app closer to a usable interpretation layer
+- Real chart generation works end to end through PyJHora.
+- The engine adapter makes mock/real switching straightforward.
+- The normalized chart contract is richer than raw PyJHora output.
+- Question-aware evidence compaction reduces hallucination risk.
+- Exports make results auditable and reusable.
+- Optional OpenAI integration is isolated and can fail gracefully.
+- The scripted runner makes repeated chart questions fast to iterate.
 
-## 14. Remaining Gaps
+## 16. Remaining Gaps
 
-Still missing or incomplete:
+Known gaps:
 
-- direct LLM integration
-- tests
-- transit layer
-- yoga detection
-- richer confidence / uncertainty metadata
-- GUI or web surface
-- deeper question-specific feature extraction beyond the current derived layer
+- No automated tests are currently installed/running in this environment.
+- Routing is keyword-based, not semantic.
+- OpenAI model choice is environment-driven but still hardcoded to a default.
+- Export deletion keeps only the latest session by design, which may not fit future history needs.
+- Transit support exists, but deeper yoga, varshaphala, shadbala, and richer predictive systems are still incomplete or absent unless explicitly present in evidence.
+- No GUI or web interface yet.
 
-## 15. Design Risks
+## 17. Recommended Next Steps
 
-- geocoding depends on network access
-- PyJHora runtime setup is still dependency-sensitive on Windows
-- some evidence routing is still keyword-based rather than chart-rule based
-- the adapter currently ignores non-core planets instead of exposing them in a controlled optional section
+Near term:
 
-## 16. Recommended Next Steps
+- Add tests around validation, question routing, chart package shape, export scope, and OpenAI-off behavior.
+- Add tests or fixtures for compact evidence paths by category.
+- Document exact dependency setup for the local Windows environment.
+- Consider preserving export history behind a config flag.
 
-### Near-term
+Next feature layer:
 
-- add automated tests around:
-  - validation
-  - question routing
-  - chart-package shape
-  - mock vs real engine behavior
-- update docs whenever runtime dependencies change
-- add a smaller user-facing summary mode instead of only raw JSON
+- Improve semantic question routing.
+- Expand yoga and strength systems only when they can be surfaced with explicit evidence.
+- Make transit-window support available from the interactive CLI, not only the scripted runner.
+- Add a small desktop or web UI once the evidence contract stabilizes.
 
-### Next feature layer
+## 18. Bottom Line
 
-- transit support
-- yoga detection
-- more explicit child / marriage / career feature extraction
-- direct LLM call using only `interpretation_context`
+The project is now a working local astrology evidence pipeline. It computes real Vedic chart data, distills that data into question-specific evidence, produces local and optional OpenAI interpretations, and saves compact scoped exports.
 
-### Longer-term
-
-- desktop or web UI
-- saved sessions or export, if privacy policy changes
-- configurable astrology conventions
-
-## 17. Bottom Line
-
-This project is no longer just a scaffold. It now has:
-
-- working real chart generation
-- multiple divisional charts
-- derived D1 features
-- richer dasha timing
-- question-aware evidence selection
-- a stable session-only CLI workflow
-
-The main remaining design work is to turn this solid evidence pipeline into a true interpretation product with tests, transits, yogas, and an actual LLM-backed response layer.
+The next major engineering work is reliability: tests, dependency documentation, and tighter user-facing workflows around repeated sessions and prediction windows.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from astrology_app.models import QuestionCategory
@@ -26,6 +27,7 @@ def build_interpretation_context(
     category: QuestionCategory,
     keys: list[str],
     extra_chart_keys: list[str] | None = None,
+    comprehensive_reading: bool = False,
 ) -> dict[str, Any]:
     context = {
         "question": question,
@@ -33,12 +35,16 @@ def build_interpretation_context(
         "evidence": {},
         "metadata": chart_package.get("metadata", {}),
         "extra_chart_requests": extra_chart_keys or [],
+        "comprehensive_reading": comprehensive_reading,
     }
     for key in keys:
         value = _get_by_path(chart_package, key)
         if value is not None:
             context["evidence"][key] = value
-    if _is_longevity_question(question=question):
+    if comprehensive_reading:
+        if _is_longevity_question(question=question):
+            context["evidence"].update(_compact_longevity_evidence(chart_package))
+    elif _is_longevity_question(question=question):
         context["evidence"] = _compact_longevity_evidence(chart_package)
     elif _is_health_question(category=category):
         context["evidence"] = _compact_health_evidence(chart_package)
@@ -52,11 +58,16 @@ def build_interpretation_context(
         evidence=context["evidence"],
         chart_package=chart_package,
         extra_chart_keys=extra_chart_keys or [],
+        selected_keys=keys,
     )
     _merge_question_requested_evidence(
         evidence=context["evidence"],
         chart_package=chart_package,
         question=question,
+    )
+    _merge_requested_transit_window_evidence(
+        evidence=context["evidence"],
+        chart_package=chart_package,
     )
     context["reading_input"] = build_question_features(
         question=question,
@@ -68,6 +79,8 @@ def build_interpretation_context(
 
 
 def generate_interpretation_answer(context: dict[str, Any]) -> str:
+    if context.get("reading_input", {}).get("question_type") == "longevity":
+        return _interpret_longevity_question(context)
     category = context["category"]
     if category == QuestionCategory.FAMILY.value:
         return _interpret_family_question(context)
@@ -78,8 +91,48 @@ def generate_interpretation_answer(context: dict[str, Any]) -> str:
     return _fallback_interpretation(context)
 
 
-def build_llm_prompt(context: dict[str, Any]) -> str:
+def _interpret_longevity_question(context: dict[str, Any]) -> str:
+    if _is_mock_context(context):
+        return (
+            "This is still mock data, so I cannot read longevity from it yet. "
+            "Run the real `jhora` engine and I can use the actual D1, D8, house-lord, and dasha evidence."
+        )
+
+    reading_input = context.get("reading_input", {})
+    supportive = reading_input.get("supportive_signals", [])
+    challenging = reading_input.get("challenging_signals", [])
+    structured_facts = reading_input.get("structured_facts", {})
+    tendency = structured_facts.get("longevity_tendency", "medium_mixed_longevity_tendency")
+    tendency_text = {
+        "longer_life_tendency": "a longer-life tendency",
+        "medium_to_longer_life_tendency": "a medium-to-longer-life tendency",
+        "medium_mixed_longevity_tendency": "a medium, mixed longevity tendency",
+        "shorter_life_caution": "a shorter-life caution pattern that deserves careful preventive attention",
+    }.get(tendency, "a medium, mixed longevity tendency")
+
+    current_stack = structured_facts.get("current_dasha_stack", [])
+    windows = structured_facts.get("supportive_mahadasha_windows", [])
+    evidence_summary = []
+    if supportive:
+        evidence_summary.append("Supportive: " + " ".join(supportive[:4]))
+    if challenging:
+        evidence_summary.append("Challenging: " + " ".join(challenging[:4]))
+    if current_stack:
+        evidence_summary.append(f"Current dasha stack: {', '.join(current_stack)}.")
+    if windows:
+        evidence_summary.append(f"Supportive mahadasha windows include: {', '.join(windows[:3])}.")
+
+    return (
+        "I would not estimate a fixed lifespan or death age from this chart. "
+        f"As a broad Vedic longevity tendency, the extracted evidence points to {tendency_text}. "
+        "Use this as a preventive-care and vitality-cycle reading, not a deterministic prediction. "
+        + " ".join(evidence_summary)
+    ).strip()
+
+
+def build_llm_prompt(context: dict[str, Any], birth_input: Any | None = None) -> str:
     evidence_keys = ", ".join(context["evidence"].keys()) or "none"
+    birth_details = _birth_details_for_prompt(birth_input)
     return (
         "You are an assistant for Hindu/Vedic astrology interpretation.\n"
         "Rules:\n"
@@ -89,11 +142,36 @@ def build_llm_prompt(context: dict[str, Any]) -> str:
         "4) Explain uncertainty where relevant.\n\n"
         f"User question: {context['question']}\n"
         f"Question category: {context['category']}\n"
+        f"{birth_details}"
         f"Available evidence keys: {evidence_keys}\n\n"
         "Selected chart evidence:\n"
         f"{json.dumps(context['evidence'], indent=2)}\n\n"
         "Structured reading input:\n"
         f"{json.dumps(context.get('reading_input', {}), indent=2)}\n"
+    )
+
+
+def _birth_details_for_prompt(birth_input: Any | None) -> str:
+    if birth_input is None:
+        return ""
+    if is_dataclass(birth_input):
+        data = asdict(birth_input)
+    elif isinstance(birth_input, dict):
+        data = birth_input
+    else:
+        data = {
+            "date_of_birth": getattr(birth_input, "date_of_birth", ""),
+            "time_of_birth": getattr(birth_input, "time_of_birth", ""),
+            "birth_place": getattr(birth_input, "birth_place", ""),
+            "timezone": getattr(birth_input, "timezone", ""),
+        }
+    return (
+        "Birth details:\n"
+        f"- Date of birth: {data.get('date_of_birth', '')}\n"
+        f"- Time of birth: {data.get('time_of_birth', '')}\n"
+        f"- Birth place: {data.get('birth_place', '')}\n"
+        f"- Timezone: {data.get('timezone', '')}\n"
+        "\n"
     )
 
 
@@ -534,9 +612,11 @@ def _compact_relationship_evidence(chart_package: dict[str, Any]) -> dict[str, A
     d1 = chart_package.get("charts", {}).get("d1", {})
     d3 = chart_package.get("charts", {}).get("d3", {})
     d9 = chart_package.get("charts", {}).get("d9", {})
+    d60 = chart_package.get("charts", {}).get("d60", {})
     houses = chart_package.get("derived", {}).get("houses", {})
     house_lords = chart_package.get("derived", {}).get("house_lords", {})
     dignities = chart_package.get("derived", {}).get("dignities", {})
+    ashtakavarga = chart_package.get("derived", {}).get("ashtakavarga", {})
     dashas = chart_package.get("dashas", {})
     transits = chart_package.get("transits", {})
     return {
@@ -560,6 +640,14 @@ def _compact_relationship_evidence(chart_package: dict[str, Any]) -> dict[str, A
         "relationship.d3": _compact_planet_house_view(d3, RELATIONSHIP_SUPPORT_PLANETS),
         "relationship.d9_table": _compact_planet_house_view(d9, RELATIONSHIP_SUPPORT_PLANETS),
         "relationship.d9": _compact_d9_marriage_view(d9),
+        "relationship.d60": _compact_planet_house_view(d60, RELATIONSHIP_SUPPORT_PLANETS),
+        "relationship.ashtakavarga": {
+            "sav_by_house": {
+                house_num: house_data
+                for house_num, house_data in ashtakavarga.get("sav_by_house", {}).items()
+                if house_num in {"1", "4", "5", "7"}
+            },
+        },
         "relationship.dashas": {
             **_compact_dasha_evidence(dashas),
         },
@@ -792,12 +880,32 @@ def _merge_requested_chart_evidence(
     evidence: dict[str, Any],
     chart_package: dict[str, Any],
     extra_chart_keys: list[str],
+    selected_keys: list[str],
 ) -> None:
     charts = chart_package.get("charts", {})
     for chart_key in extra_chart_keys:
-        chart_value = charts.get(chart_key)
+        normalized_key = chart_key.strip().lower()
+        if _chart_already_represented(normalized_key, evidence, selected_keys):
+            continue
+        chart_value = charts.get(normalized_key)
         if chart_value is not None:
-            evidence[f"requested.{chart_key}"] = chart_value
+            evidence[f"requested.{normalized_key}"] = chart_value
+
+
+def _chart_already_represented(
+    chart_key: str,
+    evidence: dict[str, Any],
+    selected_keys: list[str],
+) -> bool:
+    if f"charts.{chart_key}" in selected_keys:
+        return True
+
+    chart_suffix = f".{chart_key}"
+    chart_table_suffix = f".{chart_key}_table"
+    return any(
+        evidence_key.endswith(chart_suffix) or evidence_key.endswith(chart_table_suffix)
+        for evidence_key in evidence
+    )
 
 
 def _merge_question_requested_evidence(
@@ -809,6 +917,21 @@ def _merge_question_requested_evidence(
     query_focus = _extract_query_focus(chart_package=chart_package, question=question)
     if query_focus:
         evidence["requested.query_focus"] = query_focus
+
+
+def _merge_requested_transit_window_evidence(
+    *,
+    evidence: dict[str, Any],
+    chart_package: dict[str, Any],
+) -> None:
+    if any(key.endswith(".transit_window") for key in evidence):
+        return
+
+    requested_window = _compact_requested_transit_window(
+        chart_package.get("transits", {}).get("requested_window", {})
+    )
+    if requested_window:
+        evidence["requested.transit_window"] = requested_window
 
 
 def _extract_query_focus(*, chart_package: dict[str, Any], question: str) -> dict[str, Any]:
@@ -1060,8 +1183,59 @@ def _compact_requested_transit_window(window: dict[str, Any]) -> dict[str, Any]:
         "reference_method": window.get("reference_method", ""),
         "natal_reference": window.get("natal_reference", {}),
         "snapshot_count": len(snapshots),
+        "relationship_signal_summary": _relationship_transit_signal_summary(compact_snapshots),
         "snapshots": compact_snapshots,
     }
+
+
+def _relationship_transit_signal_summary(snapshots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    signal_totals = {
+        "jupiter_to_5th": 0,
+        "jupiter_to_7th": 0,
+        "jupiter_to_venus": 0,
+        "saturn_to_7th": 0,
+        "saturn_to_venus": 0,
+        "rahu_ketu_to_1st_7th": 0,
+        "mars_to_7th": 0,
+    }
+    for snapshot in snapshots:
+        planets = snapshot.get("major_planets", {})
+        jupiter_targets = planets.get("jupiter", {}).get("targets", {})
+        saturn_targets = planets.get("saturn", {}).get("targets", {})
+        mars_targets = planets.get("mars", {}).get("targets", {})
+        rahu_targets = planets.get("rahu", {}).get("targets", {})
+        ketu_targets = planets.get("ketu", {}).get("targets", {})
+
+        if _target_hits(jupiter_targets, "5th_house_sign"):
+            signal_totals["jupiter_to_5th"] += 1
+        if _target_hits(jupiter_targets, "7th_house_sign"):
+            signal_totals["jupiter_to_7th"] += 1
+        if _target_hits(jupiter_targets, "venus_sign"):
+            signal_totals["jupiter_to_venus"] += 1
+        if _target_hits(saturn_targets, "7th_house_sign"):
+            signal_totals["saturn_to_7th"] += 1
+        if _target_hits(saturn_targets, "venus_sign"):
+            signal_totals["saturn_to_venus"] += 1
+        if _target_hits(mars_targets, "7th_house_sign"):
+            signal_totals["mars_to_7th"] += 1
+        if (
+            _target_hits(rahu_targets, "1st_house_sign")
+            or _target_hits(rahu_targets, "7th_house_sign")
+            or _target_hits(ketu_targets, "1st_house_sign")
+            or _target_hits(ketu_targets, "7th_house_sign")
+        ):
+            signal_totals["rahu_ketu_to_1st_7th"] += 1
+
+    return [
+        {"signal": signal, "months": months}
+        for signal, months in sorted(signal_totals.items(), key=lambda item: item[1], reverse=True)
+        if months
+    ]
+
+
+def _target_hits(targets: dict[str, Any], target_key: str) -> bool:
+    target = targets.get(target_key, {})
+    return bool(target.get("occupies") or target.get("aspects"))
 
 
 def _house_sign_from_chart(asc_sign: str, house_num: int) -> str | None:

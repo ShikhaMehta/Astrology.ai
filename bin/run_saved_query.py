@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -24,7 +23,13 @@ from astrology_app.llm_openai import (
     openai_is_configured,
 )
 from astrology_app.models import BirthInput
-from astrology_app.question_router import categorize_question, select_relevant_chart_keys
+from astrology_app.pipeline import (
+    attach_requested_transit_window,
+    resolve_evidence_keys,
+    resolve_prediction_window,
+    resolve_requested_chart_keys,
+)
+from astrology_app.question_router import categorize_question
 from astrology_app.validation import ValidationError, normalize_and_validate_birth_input
 
 
@@ -36,16 +41,35 @@ QUERY_CONFIG = {
     "birth_place": "Allahabad, Uttar Pradesh, India",
     "timezone": "",
     "question": "relationship with wife",
+    "client_context": "",
+    "answer_style": (
+        "Start with past highs and lows, then future highs and lows. Sort each section by date/period. "
+        "Only include major events, critical shifts, and practical updates. "
+        "Prioritize dasha changes and repeated transit hits to 5th house, 7th house, Venus, "
+        "and the 1st/7th axis. Avoid month-by-month detail unless a month is unusually important."
+    ),
+    # Set to True to include every divisional chart plus full derived/dasha/transit evidence.
+    "comprehensive_reading": False,
     # Optional: add extra full charts into the selected evidence bundle.
-    # Example: ["d3", "d9", "d12"]
-    "requested_chart_keys": ["d1","d7", "d3","d9","d10","d12","d16","d20","d60"],
-    # Optional: request a full monthly transit ephemeris for a prediction window.
-    # If omitted, a YYYY-YYYY range in the question will be inferred automatically.
-    # "prediction_window": {
-    #     "start_date": "2022-01-01",
-    #     "end_date": "2027-12-31",
-    #     "step": "monthly",  # or "weekly", "daily"
-    # },
+    # Charts already represented by selected evidence are skipped to avoid duplicate paste payloads.
+    "requested_chart_keys": [
+        # "d1",
+        # "d7",
+        # "d3",
+        # "d9",
+        # "d10",
+        # "d12",
+        # "d16",
+        # "d20",
+        # "d60",
+    ],
+    # Optional: request a full transit ephemeris for a prediction window.
+    # If omitted, YYYY-YYYY or M/YYYY-M/YYYY ranges in the question are inferred automatically.
+    "prediction_window": {
+        "start_date": "3/2023",  # also accepts YYYY-MM-DD
+        "end_date": "12/2030",
+        "step": "monthly",  # or "weekly", "daily"
+    },
 }
 
 
@@ -57,12 +81,13 @@ def main() -> None:
         timezone=QUERY_CONFIG.get("timezone", ""),
     )
     question = QUERY_CONFIG["question"].strip()
-    requested_chart_keys = [
-        value.strip().lower()
-        for value in QUERY_CONFIG.get("requested_chart_keys", [])
-        if str(value).strip()
-    ]
-    prediction_window = _resolve_prediction_window(
+    client_context = str(QUERY_CONFIG.get("client_context", "")).strip()
+    comprehensive_reading = bool(QUERY_CONFIG.get("comprehensive_reading", False))
+    requested_chart_keys = resolve_requested_chart_keys(
+        requested_chart_keys=QUERY_CONFIG.get("requested_chart_keys"),
+        comprehensive_reading=comprehensive_reading,
+    )
+    prediction_window = resolve_prediction_window(
         question=question,
         config=QUERY_CONFIG.get("prediction_window"),
     )
@@ -89,23 +114,27 @@ def main() -> None:
         return
 
     if prediction_window:
-        _attach_requested_transit_window(
+        attach_requested_transit_window(
             chart_package=chart_package,
             birth_input=birth_input,
             prediction_window=prediction_window,
         )
 
     category = categorize_question(question)
-    relevant_keys = select_relevant_chart_keys(category)
+    relevant_keys = resolve_evidence_keys(
+        category=category,
+        comprehensive_reading=comprehensive_reading,
+    )
     interpretation_context = build_interpretation_context(
         chart_package=chart_package,
         question=question,
         category=category,
         keys=relevant_keys,
         extra_chart_keys=requested_chart_keys,
+        comprehensive_reading=comprehensive_reading,
     )
     interpretation_answer = generate_interpretation_answer(interpretation_context)
-    llm_prompt = build_llm_prompt(interpretation_context)
+    llm_prompt = build_llm_prompt(interpretation_context, birth_input=birth_input)
 
     openai_answer = None
     if openai_is_configured():
@@ -115,6 +144,15 @@ def main() -> None:
                 category=category.value,
                 reading_input=interpretation_context.get("reading_input", {}),
                 evidence=interpretation_context.get("evidence", {}),
+                birth_input={
+                    "date_of_birth": birth_input.date_of_birth,
+                    "time_of_birth": birth_input.time_of_birth,
+                    "birth_place": birth_input.birth_place,
+                    "timezone": birth_input.timezone,
+                    "timezone_source": birth_input.timezone_source,
+                    "latitude": birth_input.latitude,
+                    "longitude": birth_input.longitude,
+                },
             )
         except (OpenAIConfigurationError, OpenAIRequestError) as exc:
             openai_answer = f"[OpenAI unavailable] {exc}"
@@ -127,6 +165,25 @@ def main() -> None:
         interpretation_answer=interpretation_answer,
         llm_prompt=llm_prompt,
         openai_answer=openai_answer,
+        client_context=client_context,
+        answer_style=QUERY_CONFIG.get("answer_style"),
+        user_details={
+            "birth_input": {
+                "date_of_birth": birth_input.date_of_birth,
+                "time_of_birth": birth_input.time_of_birth,
+                "birth_place": birth_input.birth_place,
+                "timezone": birth_input.timezone,
+                "timezone_source": birth_input.timezone_source,
+                "latitude": birth_input.latitude,
+                "longitude": birth_input.longitude,
+            },
+            "question": question,
+            "known_facts": client_context,
+            "answer_style": QUERY_CONFIG.get("answer_style"),
+            "comprehensive_reading": comprehensive_reading,
+            "requested_chart_keys": requested_chart_keys,
+            "prediction_window": prediction_window or {},
+        },
     )
 
     print("\nQuery config:")
@@ -144,69 +201,6 @@ def main() -> None:
     print(f"Readable: {export_paths['markdown']}")
     print(f"Raw JSON: {export_paths['json']}")
     print(f"Copy/Paste AI prompt: {export_paths['prompt']}")
-
-
-def _resolve_prediction_window(*, question: str, config: object) -> dict | None:
-    if isinstance(config, dict):
-        start_date = str(config.get("start_date", "")).strip()
-        end_date = str(config.get("end_date", "")).strip()
-        step = str(config.get("step", "monthly")).strip().lower() or "monthly"
-        if start_date and end_date:
-            return {
-                "start_date": start_date,
-                "end_date": end_date,
-                "step": step,
-                "source": "query_config",
-            }
-    return _infer_prediction_window_from_question(question)
-
-
-def _infer_prediction_window_from_question(question: str) -> dict | None:
-    years = re.findall(r"\b(19\d{2}|20\d{2}|21\d{2})\b", question)
-    if not years:
-        return None
-    if len(years) == 1:
-        year = int(years[0])
-        return {
-            "start_date": f"{year:04d}-01-01",
-            "end_date": f"{year:04d}-12-31",
-            "step": "monthly",
-            "source": "question_year",
-        }
-
-    first_year = int(years[0])
-    last_year = int(years[1])
-    start_year = min(first_year, last_year)
-    end_year = max(first_year, last_year)
-    return {
-        "start_date": f"{start_year:04d}-01-01",
-        "end_date": f"{end_year:04d}-12-31",
-        "step": "monthly",
-        "source": "question_year_range",
-    }
-
-
-def _attach_requested_transit_window(
-    *,
-    chart_package: dict,
-    birth_input: BirthInput,
-    prediction_window: dict,
-) -> None:
-    if chart_package.get("source") != "pyjhora-adapter":
-        return
-
-    from astrology_app.pyjhora_adapter import build_requested_transit_window
-
-    transits = chart_package.setdefault("transits", {})
-    transits["requested_window"] = {
-        **build_requested_transit_window(
-            birth_input,
-            start_date=prediction_window["start_date"],
-            end_date=prediction_window["end_date"],
-            step=prediction_window.get("step", "monthly"),
-        ),
-        "request_source": prediction_window.get("source", "unknown"),
-    }
 
 
 if __name__ == "__main__":

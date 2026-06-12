@@ -79,7 +79,7 @@ def main() -> None:
         keys=relevant_keys,
     )
     interpretation_answer = generate_interpretation_answer(interpretation_context)
-    llm_prompt = build_llm_prompt(interpretation_context)
+    llm_prompt = build_llm_prompt(interpretation_context, birth_input=birth_input)
     openai_answer = None
     if openai_is_configured():
         try:
@@ -88,6 +88,15 @@ def main() -> None:
                 category=category.value,
                 reading_input=interpretation_context.get("reading_input", {}),
                 evidence=interpretation_context.get("evidence", {}),
+                birth_input={
+                    "date_of_birth": birth_input.date_of_birth,
+                    "time_of_birth": birth_input.time_of_birth,
+                    "birth_place": birth_input.birth_place,
+                    "timezone": birth_input.timezone,
+                    "timezone_source": birth_input.timezone_source,
+                    "latitude": birth_input.latitude,
+                    "longitude": birth_input.longitude,
+                },
             )
         except (OpenAIConfigurationError, OpenAIRequestError) as exc:
             openai_answer = f"[OpenAI unavailable] {exc}"
@@ -102,6 +111,18 @@ def main() -> None:
         interpretation_answer=interpretation_answer,
         llm_prompt=llm_prompt,
         openai_answer=openai_answer,
+        user_details={
+            "birth_input": {
+                "date_of_birth": birth_input.date_of_birth,
+                "time_of_birth": birth_input.time_of_birth,
+                "birth_place": birth_input.birth_place,
+                "timezone": birth_input.timezone,
+                "timezone_source": birth_input.timezone_source,
+                "latitude": birth_input.latitude,
+                "longitude": birth_input.longitude,
+            },
+            "question": question,
+        },
     )
     session.set("export_paths", {key: str(path) for key, path in export_paths.items()})
 

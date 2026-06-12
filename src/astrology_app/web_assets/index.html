@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Astrology.ai Reading Desk</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <form id="reading-form" class="panel input-panel">
+          <div class="brand-row">
+            <div>
+              <p class="eyebrow">Astrology.ai</p>
+              <h1>Reading Desk</h1>
+            </div>
+            <span id="engine-pill" class="status-pill">Local</span>
+          </div>
+
+          <div class="grid two">
+            <label>
+              <span>Date of birth</span>
+              <input name="date_of_birth" type="date" required>
+            </label>
+            <label>
+              <span>Time of birth</span>
+              <input name="time_of_birth" type="time" required>
+            </label>
+          </div>
+
+          <label>
+            <span>Birth place</span>
+            <input name="birth_place" type="text" placeholder="Allahabad, Uttar Pradesh, India" required>
+          </label>
+
+          <label>
+            <span>Timezone</span>
+            <input name="timezone" type="text" placeholder="Leave blank to infer, or use Asia/Kolkata">
+          </label>
+
+          <label>
+            <span>Question</span>
+            <textarea name="question" rows="4" placeholder="What does the chart show about marriage timing?" required></textarea>
+          </label>
+
+          <label>
+            <span>Known facts</span>
+            <textarea name="client_context" rows="3" placeholder="Optional: financially comfortable, changed jobs in 2022, owns home, seeking marriage now."></textarea>
+          </label>
+
+          <label class="checkbox-row">
+            <input name="comprehensive_reading" type="checkbox">
+            <span>Comprehensive reading (include all divisional charts)</span>
+          </label>
+
+          <div class="grid two">
+            <label>
+              <span>Extra charts</span>
+              <input name="requested_chart_keys" type="text" placeholder="d1, d9, d10">
+            </label>
+            <label>
+              <span>Transit detail</span>
+              <select name="prediction_step">
+                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly</option>
+                <option value="daily">Daily</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label>
+              <span>Optional transit start</span>
+              <input name="prediction_start" type="text" placeholder="Only for a specific period">
+            </label>
+            <label>
+              <span>Optional transit end</span>
+              <input name="prediction_end" type="text" placeholder="2027-12-31 or 12/2027">
+            </label>
+          </div>
+
+          <label>
+            <span>Answer style for DeepSeek</span>
+            <textarea name="answer_style" rows="3" placeholder="Start with past highs and lows, then future highs and lows. Keep confidence brief."></textarea>
+          </label>
+
+          <div class="action-row">
+            <button id="generate-btn" type="submit">Generate Chart Desk</button>
+            <button id="reset-btn" type="button" class="secondary">Clear</button>
+          </div>
+          <p id="form-error" class="error-text" role="alert"></p>
+        </form>
+
+        <section class="output-stack">
+          <div class="panel result-panel">
+            <div class="tabs" role="tablist" aria-label="Reading sections">
+              <button class="tab active" type="button" data-tab="summary">Summary</button>
+              <button class="tab" type="button" data-tab="prompt">DeepSeek Prompt</button>
+              <button class="tab" type="button" data-tab="evidence">Evidence</button>
+              <button class="tab" type="button" data-tab="notes">My Notes</button>
+            </div>
+
+            <section id="summary-tab" class="tab-panel active">
+              <div class="empty-state" id="empty-summary">
+                <h2>Ready for a reading</h2>
+                <p>Enter birth details and a question to generate the local chart evidence and copy/paste prompt.</p>
+              </div>
+              <div id="summary-content" class="hidden">
+                <div class="meta-grid">
+                  <div><span>Category</span><strong id="category-value"></strong></div>
+                  <div><span>Timezone</span><strong id="timezone-value"></strong></div>
+                  <div><span>Engine</span><strong id="engine-value"></strong></div>
+                  <div><span>Exports</span><strong id="exports-value"></strong></div>
+                </div>
+                <h2>Local Interpretation</h2>
+                <p id="interpretation-answer"></p>
+              </div>
+            </section>
+
+            <section id="prompt-tab" class="tab-panel">
+              <div class="toolbar">
+                <button id="copy-prompt" type="button">Copy Prompt</button>
+              </div>
+              <textarea id="prompt-output" class="code-textarea" readonly placeholder="Your DeepSeek prompt will appear here."></textarea>
+            </section>
+
+            <section id="evidence-tab" class="tab-panel">
+              <div class="evidence-layout">
+                <div>
+                  <h2>Evidence Keys</h2>
+                  <ul id="evidence-keys" class="key-list"></ul>
+                </div>
+                <div>
+                  <h2>Reading Input</h2>
+                  <pre id="reading-input" class="json-box">{}</pre>
+                </div>
+              </div>
+            </section>
+
+            <section id="notes-tab" class="tab-panel">
+              <label>
+                <span>Private reading notes</span>
+                <textarea id="human-notes" rows="12" placeholder="Add your intuition, client context, and final wording here. Notes stay in this browser tab."></textarea>
+              </label>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

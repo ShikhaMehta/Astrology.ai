@@ -101,6 +101,7 @@ VARGA_FACTORS = {
 }
 
 
+
 def generate_pyjhora_chart_package(birth_input: BirthInput) -> dict:
     jhora_const._DEFAULT_AYANAMSA_MODE = "LAHIRI"
 
@@ -205,11 +206,18 @@ def build_requested_transit_window(
     moon_sign_d1 = int(
         next(entry for entry in birth_d1[1:] if int(entry[0]) == jhora_const.MOON_ID)[1][0]
     )
+    venus_sign_d1 = int(
+        next(entry for entry in birth_d1[1:] if int(entry[0]) == jhora_const.VENUS_ID)[1][0]
+    )
     natal_house_signs = {
+        "1st_house_sign": lagna_sign_d1,
         "2nd_house_sign": (lagna_sign_d1 + 1) % 12,
+        "5th_house_sign": (lagna_sign_d1 + 4) % 12,
         "6th_house_sign": (lagna_sign_d1 + 5) % 12,
+        "7th_house_sign": (lagna_sign_d1 + 6) % 12,
         "10th_house_sign": (lagna_sign_d1 + 9) % 12,
         "11th_house_sign": (lagna_sign_d1 + 10) % 12,
+        "venus_sign": venus_sign_d1,
     }
 
     step_name = step.strip().lower() or "monthly"
@@ -274,10 +282,22 @@ def build_requested_transit_window(
         "natal_reference": {
             "lagna_sign": _sign_name_from_index(lagna_sign_d1),
             "moon_sign": _sign_name_from_index(moon_sign_d1),
-            "career_house_signs": {
+            "tracked_signs": {
                 key: _sign_name_from_index(sign_idx)
                 for key, sign_idx in natal_house_signs.items()
             },
+            "relationship_focus": [
+                "1st_house_sign",
+                "5th_house_sign",
+                "7th_house_sign",
+                "venus_sign",
+            ],
+            "career_resource_focus": [
+                "2nd_house_sign",
+                "6th_house_sign",
+                "10th_house_sign",
+                "11th_house_sign",
+            ],
         },
         "snapshots": snapshots,
     }
@@ -447,7 +467,7 @@ def _ashtakavarga_summary(house_to_planet: list[str], lagna_sign: int) -> dict:
     summary: dict[str, dict[str, Any] | list[int]] = {
         "sav_by_house": {},
     }
-    for house_num in (2, 4, 11, 12):
+    for house_num in range(1, 13):
         sign_idx = (lagna_sign + house_num - 1) % 12
         summary["sav_by_house"][str(house_num)] = {
             "points": int(sav[sign_idx]),

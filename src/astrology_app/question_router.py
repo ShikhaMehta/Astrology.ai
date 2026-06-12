@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from astrology_app.chart_catalog import ALL_DIVISIONAL_CHART_KEYS
 from astrology_app.models import QuestionCategory
 
 
@@ -117,6 +118,22 @@ def select_relevant_chart_keys(category: QuestionCategory) -> list[str]:
         ],
     }
     return category_to_keys[category]
+
+
+def select_comprehensive_chart_keys() -> list[str]:
+    chart_keys = [f"charts.{key}" for key in ALL_DIVISIONAL_CHART_KEYS]
+    return chart_keys + [
+        "derived.houses",
+        "derived.house_lords",
+        "derived.dignities",
+        "derived.aspects",
+        "derived.ashtakavarga",
+        "derived.special_conditions",
+        "nakshatras",
+        "dashas",
+        "transits",
+        "sudarshana_chakra",
+    ]
 
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:

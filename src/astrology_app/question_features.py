@@ -394,6 +394,7 @@ def _compact_wealth_features(evidence: dict[str, Any], metadata: dict[str, Any])
 
     supportive_signals: list[str] = []
     challenging_signals: list[str] = []
+    secondary_cautions: list[str] = []
 
     for house_num, label, house_data in (
         ("2", "D1 2nd house", second_house),
@@ -458,7 +459,9 @@ def _compact_wealth_features(evidence: dict[str, Any], metadata: dict[str, Any])
         if points >= 28:
             supportive_signals.append(f"Ashtakavarga supports the {label} house with {points} SAV points.")
         elif points <= 24:
-            challenging_signals.append(f"Ashtakavarga weakens the {label} house with only {points} SAV points.")
+            secondary_cautions.append(
+                f"Ashtakavarga gives only {points} SAV points to the {label} house; treat this as pressure on ease/consistency, not automatic poverty."
+            )
 
     for item in wealth_dasha_links:
         tags = set(item.get("link_tags", []))
@@ -530,13 +533,22 @@ def _compact_wealth_features(evidence: dict[str, Any], metadata: dict[str, Any])
             "current_dasha_wealth_links": wealth_dasha_links,
             "current_dasha_stack": current_stack,
             "supportive_mahadasha_windows": windows,
+            "secondary_cautions": secondary_cautions,
+            "evidence_priority": [
+                "Known life facts/client context when supplied",
+                "D2 liquid resources and D4 assets/property",
+                "Current dasha wealth-lord links and supportive Mahadasha windows",
+                "D1 2nd/4th/11th/12th house and lord condition",
+                "Ashtakavarga as a secondary modifier only",
+            ],
         },
         "supportive_signals": supportive_signals,
         "challenging_signals": challenging_signals,
         "model_guidance": [
             "Focus on wealth accumulation, cash flow, savings pressure, and debt exposure rather than generic career themes.",
-            "Use D2 for liquid resources, D4 for assets/property, and D1 for house-lord context without drifting into unrelated career themes.",
-            "Use only the compact Ashtakavarga and Gandanta summaries provided here; do not invent extra strength systems.",
+            "Prioritize D2 for liquid resources, D4 for assets/property, and current dasha wealth links over a single D1 scarcity indicator.",
+            "Do not default to poverty/scarcity from Saturn in the 2nd house or low Ashtakavarga if D2, D4, wealth-lord links, or known life facts show wealth.",
+            "Use Ashtakavarga as a secondary modifier for ease/consistency, not as the final wealth verdict.",
             "Discuss timing as likely financial phases, not exact promises.",
         ],
         "metadata": metadata,
@@ -804,6 +816,8 @@ def _longevity_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> d
     d1 = evidence.get("longevity.d1", {})
     d8 = evidence.get("longevity.d8", {})
     dashas = evidence.get("longevity.dashas", {})
+    if not d1:
+        d1, d8, dashas = _longevity_sections_from_full_evidence(evidence)
 
     first_house = d1.get("1st_house", {})
     third_house = d1.get("3rd_house", {})
@@ -884,6 +898,10 @@ def _longevity_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> d
         len(supportive_signals),
         len(challenging_signals),
     )
+    longevity_tendency = _longevity_tendency(
+        supportive_count=len(supportive_signals),
+        challenging_count=len(challenging_signals),
+    )
 
     return {
         "mode": "real",
@@ -913,6 +931,7 @@ def _longevity_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> d
                 "mars": d8.get("mars", {}),
                 "planets": d8.get("planets", {}),
             },
+            "longevity_tendency": longevity_tendency,
             "current_dasha_stack": current_stack,
             "supportive_mahadasha_windows": windows,
         },
@@ -925,6 +944,68 @@ def _longevity_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> d
         ],
         "metadata": metadata,
     }
+
+
+def _longevity_sections_from_full_evidence(
+    evidence: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    d1_chart = evidence.get("charts.d1", {})
+    d8_chart = evidence.get("charts.d8", {})
+    houses = evidence.get("derived.houses", {})
+    house_lords = evidence.get("derived.house_lords", {})
+    dignities = evidence.get("derived.dignities", {})
+    aspects = evidence.get("derived.aspects", {}).get("graha_drishti", {})
+    dashas = evidence.get("dashas", {})
+
+    first_lord_name = house_lords.get("1", {}).get("lord", "")
+    eighth_lord_name = house_lords.get("8", {}).get("lord", "")
+    d1 = {
+        "ascendant": d1_chart.get("ascendant", {}),
+        "1st_house": houses.get("1", {}),
+        "3rd_house": houses.get("3", {}),
+        "8th_house": houses.get("8", {}),
+        "1st_lord": house_lords.get("1", {}),
+        "3rd_lord": house_lords.get("3", {}),
+        "8th_lord": house_lords.get("8", {}),
+        "saturn": d1_chart.get("planets", {}).get("saturn", {}),
+        "lagna_lord_planet": d1_chart.get("planets", {}).get(first_lord_name, {}),
+        "8th_lord_planet": d1_chart.get("planets", {}).get(eighth_lord_name, {}),
+        "dignities": {
+            "saturn": dignities.get("saturn", {}),
+            "1st_lord": dignities.get(first_lord_name, {}),
+            "3rd_lord": dignities.get(house_lords.get("3", {}).get("lord"), {}),
+            "8th_lord": dignities.get(eighth_lord_name, {}),
+        },
+        "relevant_aspects": {
+            "saturn": aspects.get("saturn", {}),
+            first_lord_name: aspects.get(first_lord_name, {}),
+            eighth_lord_name: aspects.get(eighth_lord_name, {}),
+        },
+    }
+    d8 = {
+        "ascendant": d8_chart.get("ascendant", {}),
+        "saturn": d8_chart.get("planets", {}).get("saturn", {}),
+        "mars": d8_chart.get("planets", {}).get("mars", {}),
+        "8th_lord_reference": house_lords.get("8", {}),
+        "planets": {
+            "sun": d8_chart.get("planets", {}).get("sun", {}),
+            "moon": d8_chart.get("planets", {}).get("moon", {}),
+            "saturn": d8_chart.get("planets", {}).get("saturn", {}),
+            "mars": d8_chart.get("planets", {}).get("mars", {}),
+        },
+    }
+    return d1, d8, dashas
+
+
+def _longevity_tendency(*, supportive_count: int, challenging_count: int) -> str:
+    margin = supportive_count - challenging_count
+    if margin >= 4:
+        return "longer_life_tendency"
+    if margin >= 1:
+        return "medium_to_longer_life_tendency"
+    if margin <= -4:
+        return "shorter_life_caution"
+    return "medium_mixed_longevity_tendency"
 
 
 def _children_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
@@ -1182,7 +1263,9 @@ def _marriage_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> di
 
 def _relationship_features(evidence: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
     d1 = evidence.get("relationship.d1", {})
+    d60 = evidence.get("relationship.d60", {})
     d9 = evidence.get("relationship.d9", {})
+    ashtakavarga = evidence.get("relationship.ashtakavarga", {})
     dashas = evidence.get("relationship.dashas", {})
 
     fifth_house = d1.get("5th_house", {})
@@ -1255,6 +1338,7 @@ def _relationship_features(evidence: dict[str, Any], metadata: dict[str, Any]) -
     d9_venus = d9.get("venus", {})
     d9_venus_house = d9_venus.get("house")
     d9_venus_strength = d9_venus.get("sign_strength")
+    ashtakavarga_houses = ashtakavarga.get("sav_by_house", {})
 
     if d9_fifth_occupants:
         supportive_signals.append(f"D9 5th house occupants: {', '.join(d9_fifth_occupants)}.")
@@ -1294,6 +1378,15 @@ def _relationship_features(evidence: dict[str, Any], metadata: dict[str, Any]) -
         supportive_signals=supportive_signals,
         challenging_signals=challenging_signals,
     )
+
+    for house_num, label in (("1", "1st"), ("4", "Venus/home"), ("5", "5th"), ("7", "7th")):
+        points = ashtakavarga_houses.get(house_num, {}).get("points")
+        if points is None:
+            continue
+        if points >= 28:
+            supportive_signals.append(f"Ashtakavarga supports the {label} relationship area with {points} SAV points.")
+        elif points <= 24:
+            challenging_signals.append(f"Ashtakavarga pressures the {label} relationship area with {points} SAV points.")
 
     relationship_significators = sorted(
         signal for signal in {"venus", "moon", "jupiter", fifth_lord_name, seventh_lord_name} if signal
@@ -1347,6 +1440,8 @@ def _relationship_features(evidence: dict[str, Any], metadata: dict[str, Any]) -
                 "sign_strength": d9_ninth_lord_strength,
             },
             "d9_venus": d9_venus,
+            "d60_relationship_planets": d60.get("planets", {}),
+            "relationship_ashtakavarga": ashtakavarga_houses,
             "current_dasha_stack": current_stack,
             "supportive_mahadasha_windows": windows,
         },
@@ -1354,6 +1449,7 @@ def _relationship_features(evidence: dict[str, Any], metadata: dict[str, Any]) -
         "challenging_signals": challenging_signals,
         "model_guidance": [
             "For love-life questions, emphasize relationship pattern and quality before timing.",
+            "Use D60 and Ashtakavarga only when explicitly shown, and only as secondary support to D1/D9/dasha/transit evidence.",
             "Keep timing discussion to likely windows, not exact promises.",
             "Use only the structured facts and signals provided.",
         ],
