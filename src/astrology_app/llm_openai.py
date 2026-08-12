@@ -143,7 +143,9 @@ def _user_prompt(
         f"{json.dumps(evidence, indent=2)}\n\n"
         "Structured reading input:\n"
         f"{json.dumps(reading_input, indent=2)}\n\n"
-        "Please organize the answer with past observations first, then future possibilities.\n"
+        "Please keep the answers accurate based on the charts. Do not embellish the answers or "
+        "sugarcoat them. The astrologer will be able to convey it in the right manner. Your job "
+        "is to present the truth of the charts.\n"
     )
 
 

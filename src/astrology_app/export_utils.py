@@ -211,7 +211,9 @@ def _build_prompt_export(payload: dict[str, Any]) -> str:
             "Selected evidence:",
             json.dumps(selected_evidence, indent=2),
             "",
-            "Please organize the answer with past observations first, then future possibilities.",
+            "Please keep the answers accurate based on the charts. Do not embellish the answers or "
+            "sugarcoat them. The astrologer will be able to convey it in the right manner. Your job "
+            "is to present the truth of the charts.",
             "",
         ]
     )
